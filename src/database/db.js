@@ -6,14 +6,9 @@ const crypto = require('crypto');
 const config = require('../config/env');
 
 let db = null;
+let isPostgres = false;
 
-// Asegurar directorio de datos
-const dataDir = path.dirname(config.DATABASE_URL);
-if (!fs.existsSync(dataDir)) {
-    fs.mkdirSync(dataDir, { recursive: true });
-}
-
-// Función para encriptar datos sensibles
+// Función para encriptar datos sensibles (SQLite)
 function encryptData(text, key) {
     if (!text) return null;
     const iv = crypto.randomBytes(16);
@@ -24,7 +19,6 @@ function encryptData(text, key) {
     return `${iv.toString('hex')}:${encrypted}:${authTag.toString('hex')}`;
 }
 
-// Función para desencriptar datos sensibles
 function decryptData(encryptedText, key) {
     if (!encryptedText) return null;
     const [ivHex, encrypted, authTagHex] = encryptedText.split(':');
@@ -38,29 +32,37 @@ function decryptData(encryptedText, key) {
 }
 
 async function initializeDatabase() {
-    try {
-        db = await open({
-            filename: config.DATABASE_URL,
-            driver: sqlite3.Database
-        });
-        
-        console.log('✓ Base de datos conectada');
-        
-        // Habilitar foreign keys
-        await db.exec('PRAGMA foreign_keys = ON');
-        
-        // Crear tablas
-        await createTables();
-        
+    // Si hay DATABASE_URL en Render (PostgreSQL), usarlo
+    if (process.env.DATABASE_URL && process.env.DATABASE_URL.startsWith('postgresql')) {
+        console.log('🔄 Conectando a PostgreSQL (Render)...');
+        const pg = require('./pg');
+        await pg.initializePostgreSQL();
+        isPostgres = true;
+        db = pg.getPool();
+        console.log('✓ PostgreSQL conectado');
         return db;
-    } catch (error) {
-        console.error('Error conectando a la base de datos:', error);
-        throw error;
     }
+    
+    // Si no, usar SQLite (local)
+    console.log('🔄 Usando SQLite (local)...');
+    const dataDir = path.dirname(config.DATABASE_URL);
+    if (!fs.existsSync(dataDir)) {
+        fs.mkdirSync(dataDir, { recursive: true });
+    }
+    
+    db = await open({
+        filename: config.DATABASE_URL,
+        driver: sqlite3.Database
+    });
+    
+    await db.exec('PRAGMA foreign_keys = ON');
+    await createTablesSQLite();
+    console.log('✓ SQLite conectado');
+    return db;
 }
 
-async function createTables() {
-    // Tabla de usuarios
+// Tablas para SQLite
+async function createTablesSQLite() {
     await db.exec(`
         CREATE TABLE IF NOT EXISTS usuarios (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -73,7 +75,7 @@ async function createTables() {
             ultimo_acceso DATETIME,
             ip_registro TEXT,
             ip_actual TEXT,
-            fingerprint TEXT,
+            fingerprint TEXT UNIQUE,
             user_agent TEXT,
             pais TEXT,
             ciudad TEXT,
@@ -85,41 +87,10 @@ async function createTables() {
             ultimo_cambio_nombre DATETIME,
             codigo_invitacion TEXT UNIQUE,
             invitado_por INTEGER,
-            ultimo_credito_diario DATETIME,
-            FOREIGN KEY (invitado_por) REFERENCES usuarios(id)
+            ultimo_credito_diario DATETIME
         )
     `);
     
-    // Tabla de historial de nombres
-    await db.exec(`
-        CREATE TABLE IF NOT EXISTS historial_nombres (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            usuario_id INTEGER,
-            nombre_anterior TEXT,
-            nombre_nuevo TEXT,
-            creditos_gastados INTEGER,
-            fecha_cambio DATETIME DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (usuario_id) REFERENCES usuarios(id)
-        )
-    `);
-    
-    // Tabla de transacciones de créditos
-    await db.exec(`
-        CREATE TABLE IF NOT EXISTS transacciones_creditos (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            usuario_id INTEGER,
-            cantidad INTEGER,
-            tipo TEXT,
-            descripcion TEXT,
-            monto_pagado REAL,
-            metodo_pago TEXT,
-            referencia_pago TEXT,
-            fecha DATETIME DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (usuario_id) REFERENCES usuarios(id)
-        )
-    `);
-    
-    // Tabla de mensajes de chat
     await db.exec(`
         CREATE TABLE IF NOT EXISTS mensajes_chat (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -133,36 +104,42 @@ async function createTables() {
         )
     `);
     
-    // Tabla de posts del foro
     await db.exec(`
         CREATE TABLE IF NOT EXISTS posts_foro (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             usuario_id INTEGER,
             titulo TEXT,
             contenido TEXT,
+            imagen_url TEXT,
             fecha_creacion DATETIME DEFAULT CURRENT_TIMESTAMP,
             ip_origen TEXT,
             respuestas_count INTEGER DEFAULT 0,
             destacado BOOLEAN DEFAULT 0,
+            reacciones INTEGER DEFAULT 0,
+            reacciones_heart INTEGER DEFAULT 0,
+            reacciones_like INTEGER DEFAULT 0,
+            reacciones_haha INTEGER DEFAULT 0,
+            reacciones_wow INTEGER DEFAULT 0,
+            reacciones_sad INTEGER DEFAULT 0,
             FOREIGN KEY (usuario_id) REFERENCES usuarios(id)
         )
     `);
     
-    // Tabla de comentarios del foro
     await db.exec(`
         CREATE TABLE IF NOT EXISTS comentarios_foro (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             post_id INTEGER,
             usuario_id INTEGER,
             contenido TEXT,
+            imagen_url TEXT,
             fecha_creacion DATETIME DEFAULT CURRENT_TIMESTAMP,
             ip_origen TEXT,
+            reacciones INTEGER DEFAULT 0,
             FOREIGN KEY (post_id) REFERENCES posts_foro(id),
             FOREIGN KEY (usuario_id) REFERENCES usuarios(id)
         )
     `);
     
-    // Tabla de sesiones
     await db.exec(`
         CREATE TABLE IF NOT EXISTS sesiones (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -177,7 +154,6 @@ async function createTables() {
         )
     `);
     
-    // Tabla de auditoría
     await db.exec(`
         CREATE TABLE IF NOT EXISTS auditoria_admin (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -192,7 +168,6 @@ async function createTables() {
         )
     `);
     
-    // Tabla de palabras prohibidas
     await db.exec(`
         CREATE TABLE IF NOT EXISTS palabras_prohibidas (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -202,7 +177,6 @@ async function createTables() {
         )
     `);
     
-    // Tabla de productos de tienda
     await db.exec(`
         CREATE TABLE IF NOT EXISTS productos_tienda (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -213,7 +187,7 @@ async function createTables() {
         )
     `);
     
-    // Insertar productos por defecto si no existen
+    // Datos iniciales
     const productosCount = await db.get('SELECT COUNT(*) as count FROM productos_tienda');
     if (productosCount.count === 0) {
         await db.exec(`
@@ -226,25 +200,27 @@ async function createTables() {
         `);
     }
     
-    // Insertar palabras prohibidas por defecto
     const palabrasCount = await db.get('SELECT COUNT(*) as count FROM palabras_prohibidas');
     if (palabrasCount.count === 0) {
-        const palabrasIniciales = [
-            'puta', 'puto', 'mierda', 'coño', 'cabron', 'cabrona',
-            'pendejo', 'pendeja', 'hijoputa', 'malparido', 'gonorrea',
-            'chupapija', 'culiao', 'fuck', 'shit', 'bitch', 'asshole'
-        ];
+        const palabrasIniciales = ['puta', 'puto', 'mierda', 'coño', 'cabron', 'pendejo', 'hijoputa', 'fuck', 'shit', 'bitch'];
         for (const palabra of palabrasIniciales) {
             await db.run('INSERT INTO palabras_prohibidas (palabra) VALUES (?)', palabra);
         }
     }
-    
-    console.log('✓ Tablas creadas/verificadas');
+}
+
+function getDb() {
+    return db;
+}
+
+function isPostgreSQL() {
+    return isPostgres;
 }
 
 module.exports = {
     initializeDatabase,
-    getDb: () => db,
+    getDb,
+    isPostgreSQL,
     encryptData,
     decryptData
 };
