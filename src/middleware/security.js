@@ -7,15 +7,13 @@ const securityHeaders = helmet({
     contentSecurityPolicy: {
         directives: {
             defaultSrc: ["'self'"],
+            scriptSrc: ["'self'", "'unsafe-inline'", "https://cdn.socket.io", "https://cdnjs.cloudflare.com"],
+            connectSrc: ["'self'", "wss://*.onrender.com", "https://*.onrender.com", "ws://localhost:3000", "http://localhost:3000"],
+            imgSrc: ["'self'", "data:", "https:"],
             styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
             fontSrc: ["'self'", "https://fonts.gstatic.com"],
-            scriptSrc: ["'self'", "'unsafe-inline'"],
-            imgSrc: ["'self'", "data:", "https:"],
-            connectSrc: ["'self'", "wss:", "https:"],
             frameSrc: ["'none'"],
-            objectSrc: ["'none'"],
-            baseUri: ["'self'"],
-            formAction: ["'self'"]
+            objectSrc: ["'none'"]
         }
     },
     hsts: {
@@ -26,7 +24,7 @@ const securityHeaders = helmet({
 });
 
 const corsOptions = {
-    origin: process.env.NODE_ENV === 'production' ? process.env.ALLOWED_ORIGINS?.split(',') || '*' : '*',
+    origin: '*',
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
     credentials: true,

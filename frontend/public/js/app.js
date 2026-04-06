@@ -37,15 +37,12 @@ async function checkAuth() {
 // Cargar estadísticas
 async function loadStats() {
     try {
-        // Usuarios activos (simulado con WebSocket más adelante)
         const usuariosSpan = document.getElementById('usuariosCount');
         const mensajesSpan = document.getElementById('mensajesCount');
         const postsSpan = document.getElementById('postsCount');
         
         if (usuariosSpan) {
-            // Cargar desde API
             const response = await fetch(`${API_URL}/chat/mensajes?limit=1`);
-            const mensajes = await response.json();
             if (mensajesSpan) mensajesSpan.textContent = '1.2k';
             if (postsSpan) postsSpan.textContent = '342';
             if (usuariosSpan) usuariosSpan.textContent = '127';
@@ -57,7 +54,6 @@ async function loadStats() {
 
 // Configurar event listeners
 function setupEventListeners() {
-    // Botones principales
     const joinChatBtn = document.getElementById('joinChatBtn');
     const joinForumBtn = document.getElementById('joinForumBtn');
     const startBtn = document.getElementById('startBtn');
@@ -120,7 +116,6 @@ function setupEventListeners() {
         });
     }
     
-    // Cerrar modal al hacer click fuera
     window.addEventListener('click', (e) => {
         const modal = document.getElementById('registerModal');
         if (e.target === modal) {
@@ -161,12 +156,14 @@ async function registerUser() {
             token = data.token;
             updateUIForLoggedIn();
             document.getElementById('registerModal').style.display = 'none';
-            
-            // Redirigir según contexto
-            if (window.location.pathname === '/') {
-                window.location.href = '/chat';
+            window.location.href = '/chat';
+        } else if (response.status === 409 && data.iniciar_sesion) {
+            // Dispositivo ya tiene cuenta - preguntar si quiere iniciar sesión
+            const iniciar = confirm(`Este dispositivo ya tiene la cuenta "${data.usuario_existente}". ¿Quieres iniciar sesión?`);
+            if (iniciar) {
+                await loginExistente(data.usuario_existente);
             } else {
-                window.location.reload();
+                document.getElementById('registerModal').style.display = 'none';
             }
         } else {
             alert(data.error || 'Error al registrarse');
@@ -174,6 +171,34 @@ async function registerUser() {
     } catch (error) {
         console.error('Error registrando usuario:', error);
         alert('Error al registrarse');
+    }
+}
+
+// Iniciar sesión en cuenta existente
+async function loginExistente(username) {
+    try {
+        const response = await fetch(`${API_URL}/auth/login`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ username })
+        });
+        
+        const data = await response.json();
+        
+        if (response.ok && data.success) {
+            localStorage.setItem('token', data.token);
+            currentUser = data.user;
+            token = data.token;
+            updateUIForLoggedIn();
+            window.location.href = '/chat';
+        } else {
+            alert(data.error || 'Error al iniciar sesión');
+        }
+    } catch (error) {
+        console.error('Error en login:', error);
+        alert('Error al iniciar sesión');
     }
 }
 
@@ -209,7 +234,6 @@ function updateUIForLoggedIn() {
     if (loginBtn) loginBtn.style.display = 'none';
     if (logoutBtn) logoutBtn.style.display = 'block';
     
-    // Actualizar enlaces con usuario
     const navLinks = document.querySelectorAll('.nav-link');
     navLinks.forEach(link => {
         if (link.getAttribute('href') === '/perfil') {
@@ -218,7 +242,6 @@ function updateUIForLoggedIn() {
     });
 }
 
-// Actualizar UI para usuario no logueado
 function updateUIForLoggedOut() {
     const perfilLink = document.getElementById('perfilLink');
     const loginBtn = document.getElementById('loginBtn');
@@ -229,7 +252,6 @@ function updateUIForLoggedOut() {
     if (logoutBtn) logoutBtn.style.display = 'none';
 }
 
-// Utilidades
 function formatDate(date) {
     return new Date(date).toLocaleTimeString('es-ES', {
         hour: '2-digit',
@@ -242,7 +264,6 @@ function formatFullDate(date) {
 }
 
 function showNotification(message, type = 'info') {
-    // Crear elemento de notificación
     const notification = document.createElement('div');
     notification.className = `notification notification-${type}`;
     notification.textContent = message;
@@ -251,8 +272,8 @@ function showNotification(message, type = 'info') {
         bottom: 20px;
         right: 20px;
         padding: 12px 20px;
-        background: ${type === 'error' ? 'var(--error)' : type === 'success' ? 'var(--success)' : 'var(--accent)'};
-        color: var(--bg-primary);
+        background: ${type === 'error' ? '#ff4444' : type === 'success' ? '#00ff9d' : '#00ff9d'};
+        color: #0a0a0a;
         border-radius: 8px;
         z-index: 3000;
         animation: slideIn 0.3s ease;
@@ -266,7 +287,6 @@ function showNotification(message, type = 'info') {
     }, 3000);
 }
 
-// Exportar para otros scripts
 window.app = {
     API_URL,
     getToken: () => token,
