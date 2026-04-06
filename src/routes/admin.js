@@ -7,6 +7,9 @@ const { agregarCreditos, gastarCreditos } = require('../services/creditos');
 const { agregarPalabraProhibida, eliminarPalabraProhibida } = require('../utils/profanity');
 const logger = require('../utils/logger');
 
+// Importar funciones RSA para desencriptar IPs
+const { decryptWithPrivateKey } = require('../crypto/rsa');
+
 const router = express.Router();
 
 router.use(verifyToken);
@@ -60,7 +63,7 @@ router.get('/dashboard', async (req, res) => {
     }
 });
 
-// Listar usuarios (con datos sensibles desencriptados)
+// Listar usuarios (con datos sensibles desencriptados - AHORA CON RSA)
 router.get('/usuarios', async (req, res) => {
     try {
         const db = getDb();
@@ -77,16 +80,79 @@ router.get('/usuarios', async (req, res) => {
             LIMIT ? OFFSET ?
         `, [limit, offset]);
         
+        // Función auxiliar para desencriptar con RSA o AES según el formato
+        const desencriptarDato = (dato) => {
+            if (!dato) return null;
+            
+            // Si el dato contiene ':' es probable que esté encriptado con AES
+            if (dato.includes(':')) {
+                try {
+                    // Intentar desencriptar con RSA primero (para IPs)
+                    const rsaDecrypted = decryptWithPrivateKey(dato);
+                    if (rsaDecrypted && rsaDecrypted !== dato) {
+                        return rsaDecrypted;
+                    }
+                } catch(e) {
+                    // Si falla RSA, intentar con AES
+                    try {
+                        return decrypt(dato);
+                    } catch(e2) {
+                        return dato;
+                    }
+                }
+            }
+            return dato;
+        };
+        
         // Desencriptar datos sensibles
-        const usuariosConDatos = usuarios.map(user => ({
-            ...user,
-            ip_registro: user.ip_registro ? decrypt(user.ip_registro) : null,
-            ip_actual: user.ip_actual ? decrypt(user.ip_actual) : null,
-            user_agent: user.user_agent ? decrypt(user.user_agent) : null,
-            dispositivo: user.dispositivo ? JSON.parse(decrypt(user.dispositivo) || '{}') : null,
-            pais: user.pais ? decrypt(user.pais) : null,
-            ciudad: user.ciudad ? decrypt(user.ciudad) : null
-        }));
+        const usuariosConDatos = usuarios.map(user => {
+            // Desencriptar IPs (pueden estar con RSA)
+            let ipRegistroDesencriptada = user.ip_registro;
+            let ipActualDesencriptada = user.ip_actual;
+            
+            if (user.ip_registro) {
+                try {
+                    const desencriptado = decryptWithPrivateKey(user.ip_registro);
+                    if (desencriptado && desencriptado !== user.ip_registro) {
+                        ipRegistroDesencriptada = desencriptado;
+                    } else {
+                        ipRegistroDesencriptada = decrypt(user.ip_registro);
+                    }
+                } catch(e) {
+                    ipRegistroDesencriptada = decrypt(user.ip_registro);
+                }
+            }
+            
+            if (user.ip_actual) {
+                try {
+                    const desencriptado = decryptWithPrivateKey(user.ip_actual);
+                    if (desencriptado && desencriptado !== user.ip_actual) {
+                        ipActualDesencriptada = desencriptado;
+                    } else {
+                        ipActualDesencriptada = decrypt(user.ip_actual);
+                    }
+                } catch(e) {
+                    ipActualDesencriptada = decrypt(user.ip_actual);
+                }
+            }
+            
+            return {
+                ...user,
+                ip_registro: ipRegistroDesencriptada,
+                ip_actual: ipActualDesencriptada,
+                user_agent: user.user_agent ? desencriptarDato(user.user_agent) : null,
+                dispositivo: user.dispositivo ? (() => {
+                    try {
+                        const decrypted = desencriptarDato(user.dispositivo);
+                        return JSON.parse(decrypted || '{}');
+                    } catch(e) {
+                        return {};
+                    }
+                })() : null,
+                pais: user.pais ? desencriptarDato(user.pais) : null,
+                ciudad: user.ciudad ? desencriptarDato(user.ciudad) : null
+            };
+        });
         
         const total = await db.get('SELECT COUNT(*) as count FROM usuarios');
         
@@ -110,7 +176,7 @@ router.get('/usuarios', async (req, res) => {
     }
 });
 
-// Obtener detalles de un usuario específico
+// Obtener detalles de un usuario específico (CON RSA)
 router.get('/usuario/:id', async (req, res) => {
     try {
         const db = getDb();
@@ -124,13 +190,66 @@ router.get('/usuario/:id', async (req, res) => {
             return res.status(404).json({ error: 'Usuario no encontrado' });
         }
         
+        // Función auxiliar para desencriptar
+        const desencriptarDato = (dato) => {
+            if (!dato) return null;
+            if (dato.includes(':')) {
+                try {
+                    const rsaDecrypted = decryptWithPrivateKey(dato);
+                    if (rsaDecrypted && rsaDecrypted !== dato) return rsaDecrypted;
+                } catch(e) {}
+                try {
+                    return decrypt(dato);
+                } catch(e) {
+                    return dato;
+                }
+            }
+            return dato;
+        };
+        
         // Desencriptar datos sensibles
+        let ipRegistroDesencriptada = user.ip_registro;
+        let ipActualDesencriptada = user.ip_actual;
+        
+        if (user.ip_registro) {
+            try {
+                const desencriptado = decryptWithPrivateKey(user.ip_registro);
+                if (desencriptado && desencriptado !== user.ip_registro) {
+                    ipRegistroDesencriptada = desencriptado;
+                } else {
+                    ipRegistroDesencriptada = decrypt(user.ip_registro);
+                }
+            } catch(e) {
+                ipRegistroDesencriptada = decrypt(user.ip_registro);
+            }
+        }
+        
+        if (user.ip_actual) {
+            try {
+                const desencriptado = decryptWithPrivateKey(user.ip_actual);
+                if (desencriptado && desencriptado !== user.ip_actual) {
+                    ipActualDesencriptada = desencriptado;
+                } else {
+                    ipActualDesencriptada = decrypt(user.ip_actual);
+                }
+            } catch(e) {
+                ipActualDesencriptada = decrypt(user.ip_actual);
+            }
+        }
+        
         const userDecrypted = {
             ...user,
-            ip_registro: user.ip_registro ? decrypt(user.ip_registro) : null,
-            ip_actual: user.ip_actual ? decrypt(user.ip_actual) : null,
-            user_agent: user.user_agent ? decrypt(user.user_agent) : null,
-            dispositivo: user.dispositivo ? JSON.parse(decrypt(user.dispositivo) || '{}') : null
+            ip_registro: ipRegistroDesencriptada,
+            ip_actual: ipActualDesencriptada,
+            user_agent: user.user_agent ? desencriptarDato(user.user_agent) : null,
+            dispositivo: user.dispositivo ? (() => {
+                try {
+                    const decrypted = desencriptarDato(user.dispositivo);
+                    return JSON.parse(decrypted || '{}');
+                } catch(e) {
+                    return {};
+                }
+            })() : null
         };
         
         // Obtener historial de mensajes
@@ -143,7 +262,7 @@ router.get('/usuario/:id', async (req, res) => {
         
         const mensajesDecrypted = mensajes.map(m => ({
             ...m,
-            ip_origen: m.ip_origen ? decrypt(m.ip_origen) : null
+            ip_origen: m.ip_origen ? desencriptarDato(m.ip_origen) : null
         }));
         
         // Obtener historial de posts
@@ -156,7 +275,7 @@ router.get('/usuario/:id', async (req, res) => {
         
         const postsDecrypted = posts.map(p => ({
             ...p,
-            ip_origen: p.ip_origen ? decrypt(p.ip_origen) : null
+            ip_origen: p.ip_origen ? desencriptarDato(p.ip_origen) : null
         }));
         
         // Obtener historial de cambios de nombre
@@ -198,7 +317,7 @@ router.post('/usuario/:id/bloquear', async (req, res) => {
         const userId = req.params.id;
         const db = getDb();
         
-        const user = await db.get('SELECT id, username, esta_bloqueado FROM usuarios WHERE id = ?', [userId]);
+        const user = await db.get('SELECT id, username, esta_bloqueado, rol FROM usuarios WHERE id = ?', [userId]);
         
         if (!user) {
             return res.status(404).json({ error: 'Usuario no encontrado' });

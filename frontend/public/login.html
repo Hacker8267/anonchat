@@ -68,41 +68,41 @@
 <body>
     <div class="login-box">
         <h2>🔐 Login Administrador</h2>
-        <input type="text" id="username" placeholder="Usuario">
+        <input type="text" id="username" placeholder="Usuario" value="admin">
         <input type="password" id="password" placeholder="Contraseña">
-        <textarea id="rsaKey" placeholder="Clave RSA Privada (opcional)" rows="3"></textarea>
         <button id="loginBtn">Ingresar</button>
         <div id="mensaje"></div>
+        <div class="info">
+            Usuario: admin<br>
+            Contraseña: (la que configuraste en Render)
+        </div>
     </div>
     
     <script>
         async function login() {
             const username = document.getElementById('username').value;
             const password = document.getElementById('password').value;
-            const rsaKey = document.getElementById('rsaKey').value;
             const mensajeDiv = document.getElementById('mensaje');
             
-            // Limpiar mensaje anterior
             mensajeDiv.innerHTML = '';
             
-            // Validar campos
             if (!username || !password) {
                 mensajeDiv.innerHTML = '<div class="error">❌ Ingresa usuario y contraseña</div>';
                 return;
             }
             
             console.log('Intentando login con usuario:', username);
-            mensajeDiv.innerHTML = '<div class="success">⏳ Verificando credenciales...</div>';
+            mensajeDiv.innerHTML = '<div class="success">⏳ Verificando...</div>';
             
             try {
                 const response = await fetch('/api/auth/admin-login', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ username, password, rsaPrivateKey: rsaKey || undefined })
+                    body: JSON.stringify({ username, password })
                 });
                 
                 const data = await response.json();
-                console.log('Respuesta del servidor:', data);
+                console.log('Respuesta:', data);
                 
                 if (response.ok && data.success) {
                     localStorage.setItem('token', data.token);
@@ -114,12 +114,11 @@
                     mensajeDiv.innerHTML = '<div class="error">❌ ' + (data.error || 'Credenciales inválidas') + '</div>';
                 }
             } catch (error) {
-                console.error('Error en login:', error);
+                console.error('Error:', error);
                 mensajeDiv.innerHTML = '<div class="error">❌ Error de conexión: ' + error.message + '</div>';
             }
         }
         
-        // Configurar event listeners después de que el DOM cargue
         document.addEventListener('DOMContentLoaded', () => {
             const loginBtn = document.getElementById('loginBtn');
             const passwordInput = document.getElementById('password');

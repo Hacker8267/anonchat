@@ -6,18 +6,28 @@
     <title>Chat - AnonChat</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: Arial, sans-serif; background: #0a0a0a; color: white; }
-        .nav { background: #1a1a1a; padding: 15px 20px; display: flex; gap: 20px; border-bottom: 1px solid #333; }
+        body { font-family: 'Segoe UI', Arial, sans-serif; background: #0a0a0a; color: white; }
+        .nav { background: #1a1a1a; padding: 15px 20px; display: flex; gap: 20px; border-bottom: 1px solid #333; flex-wrap: wrap; }
         .nav a { color: #00ff9d; text-decoration: none; }
-        .chat-container { display: flex; flex-direction: column; height: calc(100vh - 60px); max-width: 900px; margin: 0 auto; }
+        .chat-container { display: flex; flex-direction: column; height: calc(100vh - 60px); max-width: 900px; margin: 0 auto; width: 100%; }
         .messages { flex: 1; overflow-y: auto; padding: 20px; }
-        .message { background: #1a1a1a; padding: 10px 15px; margin-bottom: 10px; border-radius: 8px; }
+        .message { background: #1a1a1a; padding: 10px 15px; margin-bottom: 10px; border-radius: 8px; word-break: break-word; }
         .message-own { background: #00ff9d; color: black; text-align: right; }
         .message-author { font-weight: bold; font-size: 0.8rem; }
         .message-time { font-size: 0.7rem; color: #888; margin-top: 4px; }
-        .input-area { display: flex; padding: 20px; gap: 10px; background: #1a1a1a; border-top: 1px solid #333; }
-        .input-area input { flex: 1; padding: 12px; background: #2a2a2a; border: 1px solid #444; color: white; border-radius: 25px; }
-        .input-area button { padding: 12px 25px; background: #00ff9d; border: none; border-radius: 25px; cursor: pointer; font-weight: bold; }
+        .input-area { display: flex; padding: 20px; gap: 10px; background: #1a1a1a; border-top: 1px solid #333; flex-wrap: wrap; align-items: center; }
+        .input-area input { flex: 1; padding: 12px; background: #2a2a2a; border: 1px solid #444; color: white; border-radius: 25px; min-width: 150px; }
+        .input-area button { padding: 12px 20px; background: #00ff9d; border: none; border-radius: 25px; cursor: pointer; font-weight: bold; }
+        .emoji-btn, .sticker-btn { background: #2a2a2a; border: 1px solid #444; padding: 10px 15px; font-size: 1.2rem; }
+        .picker { display: none; position: fixed; bottom: 80px; right: 20px; background: #1a1a1a; border: 1px solid #333; border-radius: 10px; padding: 10px; z-index: 1000; max-width: 320px; flex-wrap: wrap; gap: 8px; justify-content: center; }
+        .picker span, .picker div { font-size: 1.8rem; cursor: pointer; padding: 5px; transition: transform 0.1s; display: inline-block; }
+        .picker span:hover, .picker div:hover { transform: scale(1.2); background: #333; border-radius: 8px; }
+        @media (max-width: 600px) {
+            .input-area { flex-wrap: wrap; }
+            .input-area input { width: 100%; }
+            .picker { bottom: 130px; right: 10px; max-width: 260px; }
+            .picker span { font-size: 1.5rem; }
+        }
     </style>
     <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
 </head>
@@ -34,9 +44,27 @@
     <div class="chat-container">
         <div class="messages" id="messages"></div>
         <div class="input-area">
+            <button class="emoji-btn" id="emojiBtn">😊</button>
+            <button class="sticker-btn" id="stickerBtn">🎨</button>
             <input type="text" id="messageInput" placeholder="Escribe un mensaje...">
             <button id="sendBtn">Enviar</button>
         </div>
+    </div>
+    
+    <!-- Emojis (100% local, no usa servidor) -->
+    <div id="emojiPicker" class="picker">
+        <span>😀</span> <span>😂</span> <span>🥰</span> <span>😎</span> <span>😢</span> <span>😡</span>
+        <span>👍</span> <span>❤️</span> <span>🎉</span> <span>🔥</span> <span>💀</span> <span>✨</span>
+        <span>🌟</span> <span>💯</span> <span>🤣</span> <span>😭</span> <span>😍</span> <span>🤔</span>
+        <span>🥺</span> <span>🙏</span> <span>👋</span> <span>💪</span> <span>👀</span> <span>🎈</span>
+        <span>🐱</span> <span>🐶</span> <span>🐼</span> <span>🐸</span> <span>🦄</span> <span>🐧</span>
+    </div>
+    
+    <!-- Stickers (100% local, no usa servidor) -->
+    <div id="stickerPicker" class="picker">
+        <span>⭐</span> <span>💎</span> <span>🚀</span> <span>🎮</span> <span>💻</span> <span>🎵</span>
+        <span>🏆</span> <span>⚽</span> <span>🎸</span> <span>🎭</span> <span>🌈</span> <span>☀️</span>
+        <span>🌸</span> <span>🍕</span> <span>☕</span> <span>🎂</span> <span>💎</span> <span>📷</span>
     </div>
     
     <script>
@@ -46,13 +74,32 @@
         let socket = null;
         let currentUser = null;
         
+        // Cargar emojis favoritos desde localStorage (local)
+        function cargarFavoritos() {
+            let favs = localStorage.getItem('mis_favoritos');
+            if (favs) {
+                console.log('⭐ Emojis favoritos cargados localmente:', JSON.parse(favs));
+            }
+        }
+        
+        // Guardar emoji favorito (solo en el dispositivo)
+        function guardarFavorito(emoji) {
+            let favs = JSON.parse(localStorage.getItem('mis_favoritos') || '[]');
+            if (!favs.includes(emoji) && favs.length < 12) {
+                favs.push(emoji);
+                localStorage.setItem('mis_favoritos', JSON.stringify(favs));
+                console.log('💾 Emoji guardado localmente:', emoji);
+            }
+        }
+        
         // Obtener usuario actual
         fetch('/api/auth/verify', {
             headers: { 'Authorization': `Bearer ${token}` }
         }).then(r => r.json()).then(data => {
             if (data.valid) {
                 currentUser = data.user;
-                console.log('Usuario:', currentUser.username);
+                console.log('👤 Usuario:', currentUser.username);
+                cargarFavoritos();
                 iniciarSocket();
             } else {
                 localStorage.removeItem('token');
@@ -61,8 +108,9 @@
         });
         
         function iniciarSocket() {
-            socket = io({
-                auth: { token }
+            socket = io(window.location.origin, {
+                auth: { token },
+                transports: ['websocket', 'polling']
             });
             
             socket.on('connect', () => {
@@ -70,16 +118,21 @@
             });
             
             socket.on('mensajes_historial', (mensajes) => {
-                console.log('Historial:', mensajes.length);
+                console.log('📜 Historial:', mensajes.length);
                 const container = document.getElementById('messages');
                 container.innerHTML = '';
                 mensajes.forEach(msg => agregarMensaje(msg));
+                scrollBottom();
             });
             
             socket.on('mensaje_recibido', (msg) => {
-                console.log('Mensaje:', msg);
+                console.log('💬 Mensaje recibido');
                 agregarMensaje(msg);
                 scrollBottom();
+            });
+            
+            socket.on('connect_error', (err) => {
+                console.error('❌ Error WebSocket:', err);
             });
         }
         
@@ -89,25 +142,35 @@
             div.className = `message ${currentUser && msg.usuario_id === currentUser.id ? 'message-own' : ''}`;
             div.innerHTML = `
                 <div class="message-author">${escapeHtml(msg.nombre_mostrado)}</div>
-                <div>${escapeHtml(msg.contenido)}</div>
+                <div style="font-size: 1rem;">${escapeHtml(msg.contenido)}</div>
                 <div class="message-time">${new Date(msg.fecha_envio).toLocaleTimeString()}</div>
             `;
             container.appendChild(div);
         }
         
-        function enviarMensaje() {
-            const input = document.getElementById('messageInput');
-            const contenido = input.value.trim();
-            if (contenido && socket) {
-                console.log('Enviando:', contenido);
-                socket.emit('nuevo_mensaje', { contenido });
+        function enviarMensaje(textoPersonalizado) {
+            if (!socket) return;
+            let contenido = textoPersonalizado;
+            if (!contenido) {
+                const input = document.getElementById('messageInput');
+                contenido = input.value.trim();
+                if (!contenido) return;
                 input.value = '';
             }
+            console.log('📤 Enviando:', contenido);
+            socket.emit('nuevo_mensaje', { contenido });
+        }
+        
+        function agregarAlInput(texto) {
+            const input = document.getElementById('messageInput');
+            input.value += texto;
+            input.focus();
+            guardarFavorito(texto);
         }
         
         function scrollBottom() {
             const container = document.getElementById('messages');
-            container.scrollTop = container.scrollHeight;
+            if (container) container.scrollTop = container.scrollHeight;
         }
         
         function escapeHtml(text) {
@@ -120,13 +183,50 @@
             });
         }
         
-        document.getElementById('sendBtn').addEventListener('click', enviarMensaje);
+        // Event Listeners
+        document.getElementById('sendBtn').addEventListener('click', () => enviarMensaje());
         document.getElementById('messageInput').addEventListener('keypress', (e) => {
             if (e.key === 'Enter') enviarMensaje();
         });
         document.getElementById('logoutBtn').addEventListener('click', () => {
             localStorage.removeItem('token');
             window.location.href = '/';
+        });
+        
+        // Emoji Picker
+        const emojiBtn = document.getElementById('emojiBtn');
+        const emojiPicker = document.getElementById('emojiPicker');
+        emojiBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const isVisible = emojiPicker.style.display === 'flex';
+            emojiPicker.style.display = isVisible ? 'none' : 'flex';
+            stickerPicker.style.display = 'none';
+        });
+        document.querySelectorAll('#emojiPicker span').forEach(span => {
+            span.addEventListener('click', () => agregarAlInput(span.textContent));
+        });
+        
+        // Sticker Picker
+        const stickerBtn = document.getElementById('stickerBtn');
+        const stickerPicker = document.getElementById('stickerPicker');
+        stickerBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const isVisible = stickerPicker.style.display === 'flex';
+            stickerPicker.style.display = isVisible ? 'none' : 'flex';
+            emojiPicker.style.display = 'none';
+        });
+        document.querySelectorAll('#stickerPicker span').forEach(span => {
+            span.addEventListener('click', () => agregarAlInput(span.textContent));
+        });
+        
+        // Cerrar pickers al hacer click fuera
+        document.addEventListener('click', (e) => {
+            if (!emojiBtn.contains(e.target) && !emojiPicker.contains(e.target)) {
+                emojiPicker.style.display = 'none';
+            }
+            if (!stickerBtn.contains(e.target) && !stickerPicker.contains(e.target)) {
+                stickerPicker.style.display = 'none';
+            }
         });
     </script>
 </body>
