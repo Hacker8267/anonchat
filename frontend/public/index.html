@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="theme-color" content="#0a0a0a">
+    <meta name="description" content="Plataforma anónima de chat y foro - Comunica libremente sin revelar tu identidad">
+    <title>AnonChat - Chat y Foro Anónimo</title>
+    <link rel="manifest" href="/manifest.json">
+    <link rel="stylesheet" href="/css/styles.css">
+    <link rel="stylesheet" href="/css/glassmorphism.css">
+    <link rel="stylesheet" href="/css/responsive.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="background-gradient"></div>
+    
+    <nav class="glass-nav">
+        <div class="nav-container">
+            <div class="logo">
+                <span class="logo-icon">💬</span>
+                <span class="logo-text">AnonChat</span>
+            </div>
+            <div class="nav-links" id="navLinks">
+                <a href="/" class="nav-link active">Inicio</a>
+                <a href="/chat" class="nav-link">Chat</a>
+                <a href="/foro" class="nav-link">Foro</a>
+                <a href="/tienda" class="nav-link">Tienda</a>
+                <a href="/perfil" class="nav-link" id="perfilLink" style="display: none;">Perfil</a>
+                <button id="logoutBtn" class="nav-btn" style="display: none;">Salir</button>
+                <button id="loginBtn" class="nav-btn nav-btn-primary">Iniciar Sesión</button>
+            </div>
+            <button class="mobile-menu-btn" id="mobileMenuBtn">☰</button>
+        </div>
+    </nav>
+    
+    <main>
+        <section class="hero">
+            <div class="hero-content">
+                <h1 class="hero-title">
+                    <span class="gradient-text">Comunícate</span> en<br>
+                    completo anonimato
+                </h1>
+                <p class="hero-description">
+                    Únete a nuestra comunidad anónima. Chatea, comparte ideas en el foro<br>
+                    y exprésate libremente sin preocupaciones. Nadie sabrá quién eres.
+                </p>
+                <div class="hero-buttons">
+                    <button id="joinChatBtn" class="btn-primary">
+                        <span>💬</span> Unirse al Chat
+                    </button>
+                    <button id="joinForumBtn" class="btn-secondary">
+                        <span>📝</span> Explorar Foro
+                    </button>
+                </div>
+                <div class="stats">
+                    <div class="stat">
+                        <span class="stat-number" id="usuariosCount">0</span>
+                        <span class="stat-label">Usuarios activos</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-number" id="mensajesCount">0</span>
+                        <span class="stat-label">Mensajes enviados</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-number" id="postsCount">0</span>
+                        <span class="stat-label">Posts creados</span>
+                    </div>
+                </div>
+            </div>
+        </section>
+        
+        <section class="features">
+            <h2 class="section-title">¿Por qué elegirnos?</h2>
+            <div class="features-grid">
+                <div class="feature-card glass">
+                    <div class="feature-icon">🔒</div>
+                    <h3>100% Anónimo</h3>
+                    <p>No necesitas email ni datos personales. Tu identidad está completamente protegida.</p>
+                </div>
+                <div class="feature-card glass">
+                    <div class="feature-icon">💬</div>
+                    <h3>Chat en Vivo</h3>
+                    <p>Conversaciones en tiempo real con toda la comunidad. Mensajes instantáneos.</p>
+                </div>
+                <div class="feature-card glass">
+                    <div class="feature-icon">📝</div>
+                    <h3>Foro de Discusión</h3>
+                    <p>Crea posts, comparte ideas y participa en debates interesantes.</p>
+                </div>
+                <div class="feature-card glass">
+                    <div class="feature-icon">🎮</div>
+                    <h3>Sistema de Créditos</h3>
+                    <p>Gana créditos diariamente y úsalos para cambiar tu nombre o destacar mensajes.</p>
+                </div>
+                <div class="feature-card glass">
+                    <div class="feature-icon">🛡️</div>
+                    <h3>Seguridad Robusta</h3>
+                    <p>Encriptación RSA-2048 y AES-256. Tus datos están seguros.</p>
+                </div>
+                <div class="feature-card glass">
+                    <div class="feature-icon">📱</div>
+                    <h3>Multiplataforma</h3>
+                    <p>Funciona en móvil, tablet y escritorio. Instálala como app.</p>
+                </div>
+            </div>
+        </section>
+        
+        <section class="cta">
+            <div class="cta-content glass">
+                <h2>¿Listo para unirte?</h2>
+                <p>Comienza a chatear de forma anónima ahora mismo. Sin registros complicados.</p>
+                <button id="startBtn" class="btn-primary btn-large">Comenzar Ahora</button>
+            </div>
+        </section>
+    </main>
+    
+    <footer class="glass-footer">
+        <div class="footer-content">
+            <p>AnonChat - Plataforma de comunicación anónima</p>
+            <p class="footer-small">Tu privacidad es nuestra prioridad</p>
+        </div>
+    </footer>
+    
+    <div id="registerModal" class="modal" style="display: none;">
+        <div class="modal-content glass">
+            <span class="modal-close">&times;</span>
+            <h2>Bienvenido a AnonChat</h2>
+            <p>Elige un nombre de usuario (opcional)</p>
+            <input type="text" id="usernameInput" class="modal-input" placeholder="Ej: usuario_123" maxlength="20">
+            <p class="modal-note">Deja vacío para nombre automático</p>
+            <p class="modal-note">⚠️ Primer cambio de nombre GRATIS</p>
+            <button id="registerConfirmBtn" class="btn-primary">Comenzar</button>
+        </div>
+    </div>
+    
+    <script src="/js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login Admin - AnonChat</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: #0a0a0a;
+            color: white;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+        }
+        .login-box {
+            background: #1a1a1a;
+            padding: 2rem;
+            border-radius: 10px;
+            width: 100%;
+            max-width: 400px;
+            border: 1px solid #333;
+        }
+        input, textarea {
+            width: 100%;
+            padding: 10px;
+            margin: 10px 0;
+            background: #2a2a2a;
+            border: 1px solid #444;
+            color: white;
+            border-radius: 5px;
+            box-sizing: border-box;
+        }
+        button {
+            width: 100%;
+            padding: 10px;
+            background: #00ff9d;
+            border: none;
+            color: black;
+            font-weight: bold;
+            border-radius: 5px;
+            cursor: pointer;
+            margin-top: 10px;
+        }
+        h2 { text-align: center; margin-bottom: 1.5rem; color: #00ff9d; }
+        .error {
+            color: #ff4444;
+            margin-top: 10px;
+            text-align: center;
+            font-size: 0.9rem;
+        }
+        .success {
+            color: #00ff9d;
+            margin-top: 10px;
+            text-align: center;
+            font-size: 0.9rem;
+        }
+        .info {
+            text-align: center;
+            margin-top: 15px;
+            font-size: 0.8rem;
+            color: #888;
+        }
+    </style>
+</head>
+<body>
+    <div class="login-box">
+        <h2>🔐 Login Administrador</h2>
+        <input type="text" id="username" placeholder="Usuario">
+        <input type="password" id="password" placeholder="Contraseña">
+        <textarea id="rsaKey" placeholder="Clave RSA Privada (opcional)" rows="3"></textarea>
+        <button id="loginBtn">Ingresar</button>
+        <div id="mensaje"></div>
+    </div>
+    
+    <script>
+        async function login() {
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            const rsaKey = document.getElementById('rsaKey').value;
+            const mensajeDiv = document.getElementById('mensaje');
+            
+            // Limpiar mensaje anterior
+            mensajeDiv.innerHTML = '';
+            
+            // Validar campos
+            if (!username || !password) {
+                mensajeDiv.innerHTML = '<div class="error">❌ Ingresa usuario y contraseña</div>';
+                return;
+            }
+            
+            console.log('Intentando login con usuario:', username);
+            mensajeDiv.innerHTML = '<div class="success">⏳ Verificando credenciales...</div>';
+            
+            try {
+                const response = await fetch('/api/auth/admin-login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, password, rsaPrivateKey: rsaKey || undefined })
+                });
+                
+                const data = await response.json();
+                console.log('Respuesta del servidor:', data);
+                
+                if (response.ok && data.success) {
+                    localStorage.setItem('token', data.token);
+                    mensajeDiv.innerHTML = '<div class="success">✅ Login exitoso. Redirigiendo...</div>';
+                    setTimeout(() => {
+                        window.location.href = '/admin';
+                    }, 1000);
+                } else {
+                    mensajeDiv.innerHTML = '<div class="error">❌ ' + (data.error || 'Credenciales inválidas') + '</div>';
+                }
+            } catch (error) {
+                console.error('Error en login:', error);
+                mensajeDiv.innerHTML = '<div class="error">❌ Error de conexión: ' + error.message + '</div>';
+            }
+        }
+        
+        // Configurar event listeners después de que el DOM cargue
+        document.addEventListener('DOMContentLoaded', () => {
+            const loginBtn = document.getElementById('loginBtn');
+            const passwordInput = document.getElementById('password');
+            
+            if (loginBtn) {
+                loginBtn.addEventListener('click', login);
+            }
+            
+            if (passwordInput) {
+                passwordInput.addEventListener('keypress', (e) => {
+                    if (e.key === 'Enter') {
+                        e.preventDefault();
+                        login();
+                    }
+                });
+            }
+        });
+    </script>
+</body>
+</html>

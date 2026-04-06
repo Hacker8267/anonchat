@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chat - AnonChat</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: Arial, sans-serif; background: #0a0a0a; color: white; }
+        .nav { background: #1a1a1a; padding: 15px 20px; display: flex; gap: 20px; border-bottom: 1px solid #333; }
+        .nav a { color: #00ff9d; text-decoration: none; }
+        .chat-container { display: flex; flex-direction: column; height: calc(100vh - 60px); max-width: 900px; margin: 0 auto; }
+        .messages { flex: 1; overflow-y: auto; padding: 20px; }
+        .message { background: #1a1a1a; padding: 10px 15px; margin-bottom: 10px; border-radius: 8px; }
+        .message-own { background: #00ff9d; color: black; text-align: right; }
+        .message-author { font-weight: bold; font-size: 0.8rem; }
+        .message-time { font-size: 0.7rem; color: #888; margin-top: 4px; }
+        .input-area { display: flex; padding: 20px; gap: 10px; background: #1a1a1a; border-top: 1px solid #333; }
+        .input-area input { flex: 1; padding: 12px; background: #2a2a2a; border: 1px solid #444; color: white; border-radius: 25px; }
+        .input-area button { padding: 12px 25px; background: #00ff9d; border: none; border-radius: 25px; cursor: pointer; font-weight: bold; }
+    </style>
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+</head>
+<body>
+    <div class="nav">
+        <a href="/">Inicio</a>
+        <a href="/chat">Chat</a>
+        <a href="/foro">Foro</a>
+        <a href="/tienda">Tienda</a>
+        <a href="/perfil">Perfil</a>
+        <a href="#" id="logoutBtn">Salir</a>
+    </div>
+    
+    <div class="chat-container">
+        <div class="messages" id="messages"></div>
+        <div class="input-area">
+            <input type="text" id="messageInput" placeholder="Escribe un mensaje...">
+            <button id="sendBtn">Enviar</button>
+        </div>
+    </div>
+    
+    <script>
+        const token = localStorage.getItem('token');
+        if (!token) window.location.href = '/';
+        
+        let socket = null;
+        let currentUser = null;
+        
+        // Obtener usuario actual
+        fetch('/api/auth/verify', {
+            headers: { 'Authorization': `Bearer ${token}` }
+        }).then(r => r.json()).then(data => {
+            if (data.valid) {
+                currentUser = data.user;
+                console.log('Usuario:', currentUser.username);
+                iniciarSocket();
+            } else {
+                localStorage.removeItem('token');
+                window.location.href = '/';
+            }
+        });
+        
+        function iniciarSocket() {
+            socket = io({
+                auth: { token }
+            });
+            
+            socket.on('connect', () => {
+                console.log('✅ Conectado al chat');
+            });
+            
+            socket.on('mensajes_historial', (mensajes) => {
+                console.log('Historial:', mensajes.length);
+                const container = document.getElementById('messages');
+                container.innerHTML = '';
+                mensajes.forEach(msg => agregarMensaje(msg));
+            });
+            
+            socket.on('mensaje_recibido', (msg) => {
+                console.log('Mensaje:', msg);
+                agregarMensaje(msg);
+                scrollBottom();
+            });
+        }
+        
+        function agregarMensaje(msg) {
+            const container = document.getElementById('messages');
+            const div = document.createElement('div');
+            div.className = `message ${currentUser && msg.usuario_id === currentUser.id ? 'message-own' : ''}`;
+            div.innerHTML = `
+                <div class="message-author">${escapeHtml(msg.nombre_mostrado)}</div>
+                <div>${escapeHtml(msg.contenido)}</div>
+                <div class="message-time">${new Date(msg.fecha_envio).toLocaleTimeString()}</div>
+            `;
+            container.appendChild(div);
+        }
+        
+        function enviarMensaje() {
+            const input = document.getElementById('messageInput');
+            const contenido = input.value.trim();
+            if (contenido && socket) {
+                console.log('Enviando:', contenido);
+                socket.emit('nuevo_mensaje', { contenido });
+                input.value = '';
+            }
+        }
+        
+        function scrollBottom() {
+            const container = document.getElementById('messages');
+            container.scrollTop = container.scrollHeight;
+        }
+        
+        function escapeHtml(text) {
+            if (!text) return '';
+            return text.replace(/[&<>]/g, function(m) {
+                if (m === '&') return '&amp;';
+                if (m === '<') return '&lt;';
+                if (m === '>') return '&gt;';
+                return m;
+            });
+        }
+        
+        document.getElementById('sendBtn').addEventListener('click', enviarMensaje);
+        document.getElementById('messageInput').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') enviarMensaje();
+        });
+        document.getElementById('logoutBtn').addEventListener('click', () => {
+            localStorage.removeItem('token');
+            window.location.href = '/';
+        });
+    </script>
+</body>
+</html>

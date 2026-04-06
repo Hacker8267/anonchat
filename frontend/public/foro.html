@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Foro - AnonChat</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: Arial, sans-serif; background: #0a0a0a; color: white; }
+        .nav { background: #1a1a1a; padding: 15px 20px; display: flex; gap: 20px; border-bottom: 1px solid #333; }
+        .nav a { color: #00ff9d; text-decoration: none; }
+        .container { max-width: 1000px; margin: 20px auto; padding: 0 20px; }
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+        .post-card { background: #1a1a1a; border-radius: 10px; padding: 15px; margin-bottom: 15px; border: 1px solid #333; }
+        .post-title { font-size: 1.2rem; color: #00ff9d; margin-bottom: 8px; }
+        .post-meta { font-size: 0.8rem; color: #888; margin-bottom: 10px; }
+        button { background: #00ff9d; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; font-weight: bold; }
+        .modal {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.8); display: flex; justify-content: center; align-items: center; z-index: 1000;
+        }
+        .modal-content { background: #1a1a1a; padding: 25px; border-radius: 10px; width: 90%; max-width: 500px; }
+        input, textarea { width: 100%; padding: 10px; margin: 10px 0; background: #2a2a2a; border: 1px solid #444; color: white; border-radius: 5px; }
+    </style>
+</head>
+<body>
+    <div class="nav">
+        <a href="/">Inicio</a>
+        <a href="/chat">Chat</a>
+        <a href="/foro">Foro</a>
+        <a href="/tienda">Tienda</a>
+        <a href="/perfil">Perfil</a>
+        <a href="#" id="logoutBtn">Salir</a>
+    </div>
+    
+    <div class="container">
+        <div class="header">
+            <h1>📝 Foro</h1>
+            <button id="newPostBtn">+ Nuevo Post</button>
+        </div>
+        <div id="postsContainer"></div>
+    </div>
+    
+    <div id="modal" style="display: none;" class="modal">
+        <div class="modal-content">
+            <h3>Crear Nuevo Post</h3>
+            <input type="text" id="postTitle" placeholder="Título">
+            <textarea id="postContent" rows="5" placeholder="Contenido..."></textarea>
+            <button id="submitPostBtn">Publicar</button>
+            <button id="cancelBtn" style="background: #444; margin-top: 10px;">Cancelar</button>
+        </div>
+    </div>
+    
+    <script>
+        const token = localStorage.getItem('token');
+        if (!token) window.location.href = '/';
+        
+        let currentUser = null;
+        
+        fetch('/api/auth/verify', {
+            headers: { 'Authorization': `Bearer ${token}` }
+        }).then(r => r.json()).then(data => {
+            if (data.valid) {
+                currentUser = data.user;
+                cargarPosts();
+            } else {
+                localStorage.removeItem('token');
+                window.location.href = '/';
+            }
+        });
+        
+        async function cargarPosts() {
+            const res = await fetch('/api/foro/posts', {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            const data = await res.json();
+            const container = document.getElementById('postsContainer');
+            container.innerHTML = '';
+            if (data.posts && data.posts.length > 0) {
+                data.posts.forEach(post => {
+                    container.innerHTML += `
+                        <div class="post-card">
+                            <div class="post-title">${escapeHtml(post.titulo)}</div>
+                            <div class="post-meta">👤 ${escapeHtml(post.autor_nombre)} | 💬 ${post.respuestas_count} respuestas | 📅 ${new Date(post.fecha_creacion).toLocaleDateString()}</div>
+                            <div>${escapeHtml(post.contenido.substring(0, 200))}${post.contenido.length > 200 ? '...' : ''}</div>
+                        </div>
+                    `;
+                });
+            } else {
+                container.innerHTML = '<p>No hay posts aún. ¡Sé el primero en crear uno!</p>';
+            }
+        }
+        
+        async function crearPost() {
+            const titulo = document.getElementById('postTitle').value.trim();
+            const contenido = document.getElementById('postContent').value.trim();
+            
+            if (!titulo || !contenido) {
+                alert('Completa título y contenido');
+                return;
+            }
+            
+            const res = await fetch('/api/foro/post', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify({ titulo, contenido })
+            });
+            
+            if (res.ok) {
+                cerrarModal();
+                cargarPosts();
+                document.getElementById('postTitle').value = '';
+                document.getElementById('postContent').value = '';
+            } else {
+                const error = await res.json();
+                alert(error.error || 'Error al crear post');
+            }
+        }
+        
+        function abrirModal() { document.getElementById('modal').style.display = 'flex'; }
+        function cerrarModal() { document.getElementById('modal').style.display = 'none'; }
+        
+        function escapeHtml(text) {
+            if (!text) return '';
+            return text.replace(/[&<>]/g, function(m) {
+                if (m === '&') return '&amp;';
+                if (m === '<') return '&lt;';
+                if (m === '>') return '&gt;';
+                return m;
+            });
+        }
+        
+        document.getElementById('newPostBtn').addEventListener('click', abrirModal);
+        document.getElementById('submitPostBtn').addEventListener('click', crearPost);
+        document.getElementById('cancelBtn').addEventListener('click', cerrarModal);
+        document.getElementById('logoutBtn').addEventListener('click', () => {
+            localStorage.removeItem('token');
+            window.location.href = '/';
+        });
+    </script>
+</body>
+</html>

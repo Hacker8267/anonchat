@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Panel Admin - AnonChat</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: #0a0a0a;
+            color: white;
+            margin: 0;
+            padding: 20px;
+        }
+        .container { max-width: 1200px; margin: 0 auto; }
+        .card {
+            background: #1a1a1a;
+            border: 1px solid #333;
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        th, td {
+            padding: 10px;
+            text-align: left;
+            border-bottom: 1px solid #333;
+        }
+        th { color: #00ff9d; }
+        button {
+            background: #ff4444;
+            color: white;
+            border: none;
+            padding: 5px 10px;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        .nav {
+            background: #1a1a1a;
+            padding: 15px;
+            margin-bottom: 20px;
+            display: flex;
+            gap: 15px;
+        }
+        .nav a {
+            color: #00ff9d;
+            text-decoration: none;
+        }
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        .stat-card {
+            background: #1a1a1a;
+            padding: 15px;
+            border-radius: 10px;
+            text-align: center;
+        }
+        .stat-number {
+            font-size: 2rem;
+            color: #00ff9d;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="nav">
+            <a href="/">Inicio</a>
+            <a href="/chat">Chat</a>
+            <a href="/foro">Foro</a>
+            <a href="#" onclick="logout()">Salir</a>
+        </div>
+        
+        <h1>👑 Panel Administrador</h1>
+        
+        <div class="stats" id="stats">
+            <div class="stat-card">
+                <div class="stat-number" id="totalUsuarios">-</div>
+                <div>Total Usuarios</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number" id="totalMensajes">-</div>
+                <div>Total Mensajes</div>
+            </div>
+        </div>
+        
+        <div class="card">
+            <h2>📋 Usuarios Registrados</h2>
+            <div style="overflow-x: auto;">
+                <table id="tablaUsuarios">
+                    <thead>
+                        <tr><th>ID</th><th>Usuario</th><th>Rol</th><th>Créditos</th><th>Fecha Registro</th><th>IP</th></tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        const token = localStorage.getItem('token');
+        if (!token) window.location.href = '/admin-login';
+        
+        async function loadDashboard() {
+            const res = await fetch('/api/admin/dashboard', {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            const data = await res.json();
+            document.getElementById('totalUsuarios').textContent = data.total_usuarios || 0;
+            document.getElementById('totalMensajes').textContent = data.total_mensajes || 0;
+        }
+        
+        async function loadUsuarios() {
+            const res = await fetch('/api/admin/usuarios', {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            const data = await res.json();
+            const tbody = document.querySelector('#tablaUsuarios tbody');
+            tbody.innerHTML = '';
+            if (data.usuarios) {
+                data.usuarios.forEach(u => {
+                    const row = tbody.insertRow();
+                    row.insertCell(0).textContent = u.id;
+                    row.insertCell(1).textContent = u.username;
+                    row.insertCell(2).textContent = u.rol;
+                    row.insertCell(3).textContent = u.creditos;
+                    row.insertCell(4).textContent = new Date(u.fecha_registro).toLocaleDateString();
+                    row.insertCell(5).textContent = u.ip_actual || '-';
+                });
+            }
+        }
+        
+        function logout() {
+            localStorage.removeItem('token');
+            window.location.href = '/admin-login';
+        }
+        
+        loadDashboard();
+        loadUsuarios();
+    </script>
+</body>
+</html>

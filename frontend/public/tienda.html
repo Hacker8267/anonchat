@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tienda - AnonChat</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: #0a0a0a;
+            color: white;
+            margin: 0;
+            padding: 20px;
+        }
+        .nav {
+            background: #1a1a1a;
+            padding: 15px;
+            margin-bottom: 20px;
+            display: flex;
+            gap: 15px;
+        }
+        .nav a { color: #00ff9d; text-decoration: none; }
+        .productos {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+        }
+        .producto {
+            background: #1a1a1a;
+            border: 1px solid #333;
+            border-radius: 10px;
+            padding: 20px;
+            text-align: center;
+        }
+        .creditos { font-size: 2rem; color: #00ff9d; margin: 10px 0; }
+        .precio { font-size: 1.5rem; margin: 10px 0; }
+        button {
+            background: #00ff9d;
+            border: none;
+            padding: 10px;
+            border-radius: 5px;
+            cursor: pointer;
+            width: 100%;
+        }
+        .creditos-usuario {
+            text-align: right;
+            font-size: 1.2rem;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="nav">
+        <a href="/">Inicio</a>
+        <a href="/chat">Chat</a>
+        <a href="/foro">Foro</a>
+        <a href="/perfil">Perfil</a>
+        <a href="#" onclick="logout()">Salir</a>
+    </div>
+    
+    <div class="creditos-usuario" id="creditosUsuario">Cargando créditos...</div>
+    <h1>🛒 Tienda de Créditos</h1>
+    <div class="productos" id="productos"></div>
+    
+    <script>
+        const token = localStorage.getItem('token');
+        if (!token) window.location.href = '/';
+        
+        async function loadCreditos() {
+            const res = await fetch('/api/usuario/creditos', {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            const data = await res.json();
+            document.getElementById('creditosUsuario').innerHTML = `💰 Tus créditos: ${data.creditos}`;
+        }
+        
+        async function loadProductos() {
+            const res = await fetch('/api/tienda/productos', {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            const data = await res.json();
+            const container = document.getElementById('productos');
+            container.innerHTML = '';
+            data.forEach(p => {
+                container.innerHTML += `
+                    <div class="producto">
+                        <h3>${p.nombre}</h3>
+                        <div class="creditos">💎 ${p.creditos} créditos</div>
+                        <div class="precio">$${p.precio_usd} USD</div>
+                        <button onclick="alert('Próximamente disponible')">Comprar</button>
+                    </div>
+                `;
+            });
+        }
+        
+        function logout() { localStorage.removeItem('token'); window.location.href = '/'; }
+        
+        loadCreditos();
+        loadProductos();
+    </script>
+</body>
+</html>

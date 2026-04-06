@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mi Perfil - AnonChat</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: Arial, sans-serif; background: #0a0a0a; color: white; }
+        .nav { background: #1a1a1a; padding: 15px 20px; display: flex; gap: 20px; border-bottom: 1px solid #333; }
+        .nav a { color: #00ff9d; text-decoration: none; }
+        .container { max-width: 600px; margin: 40px auto; padding: 0 20px; }
+        .card { background: #1a1a1a; border-radius: 10px; padding: 20px; margin-bottom: 20px; border: 1px solid #333; }
+        .info { margin: 10px 0; }
+        input { padding: 10px; background: #2a2a2a; border: 1px solid #444; color: white; border-radius: 5px; width: 70%; }
+        button { background: #00ff9d; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div class="nav">
+        <a href="/">Inicio</a>
+        <a href="/chat">Chat</a>
+        <a href="/foro">Foro</a>
+        <a href="/tienda">Tienda</a>
+        <a href="/perfil">Perfil</a>
+        <a href="#" id="logoutBtn">Salir</a>
+    </div>
+    
+    <div class="container">
+        <h1>👤 Mi Perfil</h1>
+        <div class="card" id="perfilInfo"></div>
+        <div class="card">
+            <h3>Cambiar nombre</h3>
+            <input type="text" id="nuevoNombre" placeholder="Nuevo nombre">
+            <button id="cambiarNombreBtn">Cambiar</button>
+            <p style="font-size: 0.8rem; color: #888; margin-top: 10px;">⚠️ Primer cambio GRATIS. Luego cuesta 5 créditos.</p>
+        </div>
+    </div>
+    
+    <script>
+        const token = localStorage.getItem('token');
+        if (!token) window.location.href = '/';
+        
+        let currentUser = null;
+        
+        async function cargarPerfil() {
+            const res = await fetch('/api/usuario/perfil', {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            const data = await res.json();
+            currentUser = data;
+            document.getElementById('perfilInfo').innerHTML = `
+                <div class="info"><strong>Usuario:</strong> ${escapeHtml(data.username)}</div>
+                <div class="info"><strong>Créditos:</strong> 💎 ${data.creditos}</div>
+                <div class="info"><strong>Fecha registro:</strong> ${new Date(data.fecha_registro).toLocaleDateString()}</div>
+                <div class="info"><strong>Código invitación:</strong> ${data.codigo_invitacion}</div>
+                <div class="info"><strong>Veces que cambió nombre:</strong> ${data.cambio_nombre_count}</div>
+            `;
+        }
+        
+        async function cambiarNombre() {
+            const nuevoNombre = document.getElementById('nuevoNombre').value.trim();
+            if (!nuevoNombre) {
+                alert('Escribe un nombre');
+                return;
+            }
+            
+            const res = await fetch('/api/usuario/cambiar-nombre', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify({ nuevoNombre })
+            });
+            
+            const data = await res.json();
+            if (res.ok) {
+                alert(data.mensaje);
+                cargarPerfil();
+                document.getElementById('nuevoNombre').value = '';
+            } else {
+                alert(data.error);
+            }
+        }
+        
+        function escapeHtml(text) { return text?.replace(/[&<>]/g, function(m) { if(m==='&') return '&amp;'; if(m==='<') return '&lt;'; if(m==='>') return '&gt;'; return m; }); }
+        
+        document.getElementById('cambiarNombreBtn').addEventListener('click', cambiarNombre);
+        document.getElementById('logoutBtn').addEventListener('click', () => {
+            localStorage.removeItem('token');
+            window.location.href = '/';
+        });
+        
+        cargarPerfil();
+    </script>
+</body>
+</html>
