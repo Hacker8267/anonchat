@@ -8,9 +8,22 @@ const { encrypt } = require('../crypto/aes');
 const { agregarCreditos } = require('../services/creditos');
 const config = require('../config/env');
 const { contieneInsultos } = require('../utils/profanity');
-const logger = require('../utils/logger');
 
 const router = express.Router();
+
+// Helper para ejecutar consultas según la BD
+async function executeQuery(db, isPG, query, params, isSelect = true) {
+    if (isPG) {
+        const result = await db.query(query, params);
+        return isSelect ? result.rows : result;
+    } else {
+        if (isSelect) {
+            return await db.get(query, params);
+        } else {
+            return await db.run(query, params);
+        }
+    }
+}
 
 // Registrar nuevo usuario anónimo
 router.post('/register', [
@@ -24,14 +37,14 @@ router.post('/register', [
         const codigoInvitacion = req.body.invitacion;
         
         console.log('=== REGISTRO NUEVO USUARIO ===');
-        console.log('Username recibido:', username);
+        console.log('Username:', username);
         console.log('Base de datos:', isPG ? 'PostgreSQL' : 'SQLite');
         
-        // Obtener fingerprint del dispositivo
+        // Obtener fingerprint
         const fingerprint = generateFingerprint(req);
         const fingerprintEncriptado = encrypt(fingerprint) || fingerprint;
         
-        // VERIFICAR si este dispositivo YA TIENE una cuenta
+        // Verificar si el dispositivo ya tiene cuenta
         let dispositivoExistente = null;
         if (isPG) {
             const result = await db.query('SELECT id, username FROM usuarios WHERE fingerprint = $1', [fingerprintEncriptado]);
@@ -41,46 +54,39 @@ router.post('/register', [
         }
         
         if (dispositivoExistente) {
-            console.log('🚫 Este dispositivo ya tiene una cuenta:', dispositivoExistente.username);
-            return res.status(409).json({ 
-                error: 'Este dispositivo ya tiene una cuenta. Inicia sesión con tu usuario.',
-                usuario_existente: dispositivoExistente.username,
-                cuenta_id: dispositivoExistente.id,
-                iniciar_sesion: true
+            console.log('🚫 Dispositivo ya tiene cuenta:', dispositivoExistente.username);
+            return res.status(409).json({
+                error: 'Este dispositivo ya tiene una cuenta. Inicia sesión.',
+                usuario_existente: dispositivoExistente.username
             });
         }
         
-        // Generar nombre automático si no se proporciona
+        // Generar nombre si está vacío
         if (!username || username === '') {
             const randomNum = Math.floor(Math.random() * 10000);
             username = `anon_${randomNum}`;
             
-            let exists = null;
-            if (isPG) {
-                const result = await db.query('SELECT id FROM usuarios WHERE username = $1', [username]);
-                exists = result.rows[0];
-            } else {
-                exists = await db.get('SELECT id FROM usuarios WHERE username = ?', [username]);
-            }
-            
+            let exists = true;
             let counter = 1;
             while (exists) {
-                username = `anon_${randomNum}_${counter}`;
                 if (isPG) {
                     const result = await db.query('SELECT id FROM usuarios WHERE username = $1', [username]);
                     exists = result.rows[0];
                 } else {
                     exists = await db.get('SELECT id FROM usuarios WHERE username = ?', [username]);
                 }
-                counter++;
+                if (exists) {
+                    username = `anon_${randomNum}_${counter}`;
+                    counter++;
+                }
             }
-            console.log('Nombre automático generado:', username);
+            console.log('Nombre generado:', username);
         } else {
             if (username.length < 3 || username.length > 20) {
                 return res.status(400).json({ error: 'El nombre debe tener entre 3 y 20 caracteres' });
             }
             if (!/^[a-zA-Z0-9_]+$/.test(username)) {
-                return res.status(400).json({ error: 'El nombre solo puede contener letras, números y guión bajo' });
+                return res.status(400).json({ error: 'Solo letras, números y guión bajo' });
             }
             
             let existe = null;
@@ -92,49 +98,43 @@ router.post('/register', [
             }
             
             if (existe) {
-                return res.status(400).json({ error: 'Este nombre ya está en uso' });
+                return res.status(400).json({ error: 'Nombre ya en uso' });
             }
             
             if (await contieneInsultos(username)) {
-                return res.status(400).json({ error: 'El nombre contiene lenguaje ofensivo' });
+                return res.status(400).json({ error: 'Nombre ofensivo' });
             }
         }
         
-        // Obtener datos del dispositivo
+        // Datos del dispositivo
         const ip = req.ip || req.connection.remoteAddress || '127.0.0.1';
         const userAgent = req.headers['user-agent'] || 'unknown';
         const deviceInfo = getDeviceInfo(userAgent);
         
-        let ipEncriptada, userAgentEncriptado, dispositivoEncriptado;
-        try {
-            ipEncriptada = encrypt(ip) || ip;
-            userAgentEncriptado = encrypt(userAgent) || userAgent;
-            dispositivoEncriptado = encrypt(JSON.stringify(deviceInfo)) || JSON.stringify(deviceInfo);
-        } catch (encError) {
-            ipEncriptada = ip;
-            userAgentEncriptado = userAgent;
-            dispositivoEncriptado = JSON.stringify(deviceInfo);
-        }
-        
+        const ipEncriptada = encrypt(ip) || ip;
+        const userAgentEncriptado = encrypt(userAgent) || userAgent;
+        const dispositivoEncriptado = encrypt(JSON.stringify(deviceInfo)) || JSON.stringify(deviceInfo);
         const codigoNuevo = Math.random().toString(36).substring(2, 10);
         
+        // Verificar invitación
         let invitadoPor = null;
         if (codigoInvitacion) {
-            let invitador = null;
-            if (isPG) {
-                const result = await db.query('SELECT id FROM usuarios WHERE codigo_invitacion = $1', [codigoInvitacion]);
-                invitador = result.rows[0];
-            } else {
-                invitador = await db.get('SELECT id FROM usuarios WHERE codigo_invitacion = ?', [codigoInvitacion]);
-            }
-            if (invitador) {
-                invitadoPor = invitador.id;
-                try {
+            try {
+                let invitador = null;
+                if (isPG) {
+                    const result = await db.query('SELECT id FROM usuarios WHERE codigo_invitacion = $1', [codigoInvitacion]);
+                    invitador = result.rows[0];
+                } else {
+                    invitador = await db.get('SELECT id FROM usuarios WHERE codigo_invitacion = ?', [codigoInvitacion]);
+                }
+                if (invitador) {
+                    invitadoPor = invitador.id;
                     await agregarCreditos(invitador.id, config.CREDITS_POR_INVITACION, 'invitacion', 'Invitó a un usuario');
-                } catch (err) {}
-            }
+                }
+            } catch (err) {}
         }
         
+        // Crear usuario
         let userId;
         if (isPG) {
             const result = await db.query(`
@@ -165,7 +165,7 @@ router.post('/register', [
             userId = result.lastID;
         }
         
-        console.log('✅ Usuario creado con ID:', userId);
+        console.log('✅ Usuario creado ID:', userId);
         
         const token = generateToken(userId);
         
@@ -195,84 +195,7 @@ router.post('/register', [
         
     } catch (error) {
         console.error('❌ Error en registro:', error);
-        res.status(500).json({ error: 'Error al registrar usuario: ' + error.message });
-    }
-});
-
-// INICIAR SESIÓN EN CUENTA EXISTENTE
-router.post('/login', [
-    body('username').notEmpty(),
-    body('password').optional()
-], async (req, res) => {
-    try {
-        const { username } = req.body;
-        const db = getDb();
-        const isPG = isPostgreSQL();
-        
-        console.log('=== INTENTO LOGIN ===');
-        console.log('Usuario:', username);
-        
-        let user = null;
-        if (isPG) {
-            const result = await db.query('SELECT id, username, rol, creditos, esta_bloqueado FROM usuarios WHERE username = $1', [username]);
-            user = result.rows[0];
-        } else {
-            user = await db.get('SELECT id, username, rol, creditos, esta_bloqueado FROM usuarios WHERE username = ?', [username]);
-        }
-        
-        if (!user) {
-            return res.status(401).json({ error: 'Usuario no encontrado' });
-        }
-        
-        if (user.esta_bloqueado) {
-            return res.status(403).json({ error: 'Usuario bloqueado' });
-        }
-        
-        const fingerprint = generateFingerprint(req);
-        const fingerprintEncriptado = encrypt(fingerprint) || fingerprint;
-        const ip = req.ip || req.connection.remoteAddress || '127.0.0.1';
-        const ipEncriptada = encrypt(ip) || ip;
-        
-        if (isPG) {
-            await db.query(`
-                UPDATE usuarios SET fingerprint = $1, ip_actual = $2, ultimo_acceso = $3
-                WHERE id = $4
-            `, [fingerprintEncriptado, ipEncriptada, new Date().toISOString(), user.id]);
-        } else {
-            await db.run(`
-                UPDATE usuarios SET fingerprint = ?, ip_actual = ?, ultimo_acceso = ?
-                WHERE id = ?
-            `, [fingerprintEncriptado, ipEncriptada, new Date().toISOString(), user.id]);
-        }
-        
-        const token = generateToken(user.id);
-        
-        if (isPG) {
-            await db.query(`
-                INSERT INTO sesiones (usuario_id, token, ip, user_agent)
-                VALUES ($1, $2, $3, $4)
-            `, [user.id, token, ipEncriptada, req.headers['user-agent'] || 'unknown']);
-        } else {
-            await db.run(`
-                INSERT INTO sesiones (usuario_id, token, ip, user_agent)
-                VALUES (?, ?, ?, ?)
-            `, [user.id, token, ipEncriptada, req.headers['user-agent'] || 'unknown']);
-        }
-        
-        res.json({
-            success: true,
-            token,
-            user: {
-                id: user.id,
-                username: user.username,
-                rol: user.rol,
-                creditos: user.creditos
-            }
-        });
-        
-    } catch (error) {
-        console.error('Error en login:', error);
-        res.status(500).json({ error: 'Error al iniciar sesión' });
+        res.status(500).json({ error: 'Error al registrar: ' + error.message });
     }
 });
 
@@ -286,8 +209,7 @@ router.post('/admin-login', [
         const db = getDb();
         const isPG = isPostgreSQL();
         
-        console.log('=== INTENTO LOGIN ADMIN ===');
-        console.log('Usuario:', username);
+        console.log('=== LOGIN ADMIN ===');
         
         let admin = null;
         if (isPG) {
@@ -306,7 +228,7 @@ router.post('/admin-login', [
             return res.status(401).json({ error: 'Credenciales inválidas' });
         }
         
-        const ip = req.ip || req.connection.remoteAddress || '127.0.0.1';
+        const ip = req.ip || req.connection.remoteAddress;
         const userAgent = req.headers['user-agent'] || 'unknown';
         const jwt = require('jsonwebtoken');
         const token = jwt.sign({ userId: admin.id }, config.JWT_SECRET, { expiresIn: '24h' });
@@ -323,18 +245,10 @@ router.post('/admin-login', [
             `, [admin.id, token, ip, userAgent]);
         }
         
-        res.json({
-            success: true,
-            token,
-            admin: {
-                id: admin.id,
-                username: admin.username,
-                rol: admin.rol
-            }
-        });
+        res.json({ success: true, token, admin: { id: admin.id, username: admin.username, rol: admin.rol } });
         
     } catch (error) {
-        console.error('Error en login admin:', error);
+        console.error('Error login admin:', error);
         res.status(500).json({ error: 'Error al iniciar sesión' });
     }
 });
@@ -342,28 +256,13 @@ router.post('/admin-login', [
 // Verificar token
 router.get('/verify', async (req, res) => {
     const token = req.headers['authorization']?.split(' ')[1];
-    
-    if (!token) {
-        return res.status(401).json({ valid: false });
-    }
+    if (!token) return res.status(401).json({ valid: false });
     
     try {
         const jwt = require('jsonwebtoken');
         const decoded = jwt.verify(token, config.JWT_SECRET);
         const db = getDb();
         const isPG = isPostgreSQL();
-        
-        let session = null;
-        if (isPG) {
-            const result = await db.query('SELECT * FROM sesiones WHERE token = $1 AND activa = true', [token]);
-            session = result.rows[0];
-        } else {
-            session = await db.get('SELECT * FROM sesiones WHERE token = ? AND activa = 1', [token]);
-        }
-        
-        if (!session) {
-            return res.status(401).json({ valid: false });
-        }
         
         let user = null;
         if (isPG) {
@@ -373,13 +272,9 @@ router.get('/verify', async (req, res) => {
             user = await db.get('SELECT id, username, rol, creditos, esta_bloqueado FROM usuarios WHERE id = ?', [decoded.userId]);
         }
         
-        if (!user || user.esta_bloqueado) {
-            return res.status(401).json({ valid: false });
-        }
-        
+        if (!user) return res.status(401).json({ valid: false });
         res.json({ valid: true, user });
     } catch (error) {
-        console.error('Error verificando token:', error);
         res.status(401).json({ valid: false });
     }
 });
@@ -387,21 +282,15 @@ router.get('/verify', async (req, res) => {
 // Logout
 router.post('/logout', async (req, res) => {
     const token = req.headers['authorization']?.split(' ')[1];
-    
     if (token) {
         const db = getDb();
         const isPG = isPostgreSQL();
-        
         if (isPG) {
             await db.query('UPDATE sesiones SET activa = false, fecha_fin = NOW() WHERE token = $1', [token]);
         } else {
-            await db.run('UPDATE sesiones SET activa = 0, fecha_fin = ? WHERE token = ?', [
-                new Date().toISOString(),
-                token
-            ]);
+            await db.run('UPDATE sesiones SET activa = 0, fecha_fin = ? WHERE token = ?', [new Date().toISOString(), token]);
         }
     }
-    
     res.json({ success: true });
 });
 
