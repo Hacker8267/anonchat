@@ -21,6 +21,7 @@
         }
         .modal-content { background: #1a1a1a; padding: 25px; border-radius: 10px; width: 90%; max-width: 500px; }
         input, textarea { width: 100%; padding: 10px; margin: 10px 0; background: #2a2a2a; border: 1px solid #444; color: white; border-radius: 5px; }
+        .error-msg { color: #ff4444; margin-top: 10px; font-size: 0.8rem; }
     </style>
 </head>
 <body>
@@ -48,15 +49,21 @@
             <textarea id="postContent" rows="5" placeholder="Contenido..."></textarea>
             <button id="submitPostBtn">Publicar</button>
             <button id="cancelBtn" style="background: #444; margin-top: 10px;">Cancelar</button>
+            <div id="modalError" class="error-msg"></div>
         </div>
     </div>
     
     <script>
-        const token = localStorage.getItem('token');
-        if (!token) window.location.href = '/';
-        
+        // Obtener token al inicio
+        let token = localStorage.getItem('token');
         let currentUser = null;
         
+        if (!token) {
+            console.error('No hay token');
+            window.location.href = '/';
+        }
+        
+        // Verificar autenticación
         fetch('/api/auth/verify', {
             headers: { 'Authorization': `Bearer ${token}` }
         }).then(r => r.json()).then(data => {
@@ -94,33 +101,59 @@
         async function crearPost() {
             const titulo = document.getElementById('postTitle').value.trim();
             const contenido = document.getElementById('postContent').value.trim();
+            const modalError = document.getElementById('modalError');
+            
+            modalError.innerHTML = '';
             
             if (!titulo || !contenido) {
-                alert('Completa título y contenido');
+                modalError.innerHTML = 'Completa título y contenido';
                 return;
             }
             
-            const res = await fetch('/api/foro/post', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`
-                },
-                body: JSON.stringify({ titulo, contenido })
-            });
+            // 🔑 Obtener token FRESCO cada vez
+            const tokenActual = localStorage.getItem('token');
+            if (!tokenActual) {
+                modalError.innerHTML = 'Sesión expirada. Redirigiendo...';
+                setTimeout(() => window.location.href = '/', 1500);
+                return;
+            }
             
-            if (res.ok) {
-                cerrarModal();
-                cargarPosts();
-                document.getElementById('postTitle').value = '';
-                document.getElementById('postContent').value = '';
-            } else {
-                const error = await res.json();
-                alert(error.error || 'Error al crear post');
+            try {
+                const res = await fetch('/api/foro/post', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${tokenActual}`
+                    },
+                    body: JSON.stringify({ titulo, contenido })
+                });
+                
+                if (res.status === 401) {
+                    modalError.innerHTML = 'Sesión expirada. Redirigiendo...';
+                    localStorage.removeItem('token');
+                    setTimeout(() => window.location.href = '/', 1500);
+                    return;
+                }
+                
+                if (res.ok) {
+                    cerrarModal();
+                    cargarPosts();
+                    document.getElementById('postTitle').value = '';
+                    document.getElementById('postContent').value = '';
+                } else {
+                    const error = await res.json();
+                    modalError.innerHTML = error.error || 'Error al crear post';
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                modalError.innerHTML = 'Error de conexión';
             }
         }
         
-        function abrirModal() { document.getElementById('modal').style.display = 'flex'; }
+        function abrirModal() { 
+            document.getElementById('modal').style.display = 'flex';
+            document.getElementById('modalError').innerHTML = '';
+        }
         function cerrarModal() { document.getElementById('modal').style.display = 'none'; }
         
         function escapeHtml(text) {
