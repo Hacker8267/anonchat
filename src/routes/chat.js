@@ -1,6 +1,6 @@
 const express = require('express');
 const { verifyToken } = require('../middleware/auth');
-const { getDb } = require('../database/db');
+const { getDb, isPostgreSQL } = require('../database/db');
 const { filtrarInsultos } = require('../utils/profanity');
 const { getIO } = require('../services/websocket');
 const logger = require('../utils/logger');
@@ -13,16 +13,31 @@ router.use(verifyToken);
 router.get('/mensajes', async (req, res) => {
     try {
         const db = getDb();
+        const isPG = isPostgreSQL();
         const limit = Math.min(parseInt(req.query.limit) || 50, 100);
         
-        const mensajes = await db.all(`
-            SELECT m.id, m.usuario_id, m.nombre_mostrado, m.contenido, 
-                   m.fecha_envio, m.destacado
-            FROM mensajes_chat m
-            JOIN usuarios u ON m.usuario_id = u.id
-            WHERE u.esta_bloqueado = 0
-            ORDER BY m.fecha_envio DESC LIMIT ?
-        `, [limit]);
+        let mensajes;
+        if (isPG) {
+            const result = await db.query(`
+                SELECT m.id, m.usuario_id, m.nombre_mostrado, m.contenido, 
+                       m.fecha_envio, m.destacado
+                FROM mensajes_chat m
+                JOIN usuarios u ON m.usuario_id = u.id
+                WHERE u.esta_bloqueado = false
+                ORDER BY m.fecha_envio DESC
+                LIMIT $1
+            `, [limit]);
+            mensajes = result.rows;
+        } else {
+            mensajes = await db.all(`
+                SELECT m.id, m.usuario_id, m.nombre_mostrado, m.contenido, 
+                       m.fecha_envio, m.destacado
+                FROM mensajes_chat m
+                JOIN usuarios u ON m.usuario_id = u.id
+                WHERE u.esta_bloqueado = 0
+                ORDER BY m.fecha_envio DESC LIMIT ?
+            `, [limit]);
+        }
         
         res.json(mensajes.reverse());
         
@@ -43,15 +58,27 @@ router.post('/mensaje', async (req, res) => {
         
         const contenidoFiltrado = await filtrarInsultos(contenido);
         const db = getDb();
+        const isPG = isPostgreSQL();
         const ip = req.ip || req.connection.remoteAddress;
         
-        const result = await db.run(`
-            INSERT INTO mensajes_chat (usuario_id, nombre_mostrado, contenido, ip_origen)
-            VALUES (?, ?, ?, ?)
-        `, [req.user.id, req.user.username, contenidoFiltrado, ip]);
+        let mensajeId;
+        if (isPG) {
+            const result = await db.query(`
+                INSERT INTO mensajes_chat (usuario_id, nombre_mostrado, contenido, ip_origen)
+                VALUES ($1, $2, $3, $4)
+                RETURNING id
+            `, [req.user.id, req.user.username, contenidoFiltrado, ip]);
+            mensajeId = result.rows[0].id;
+        } else {
+            const result = await db.run(`
+                INSERT INTO mensajes_chat (usuario_id, nombre_mostrado, contenido, ip_origen)
+                VALUES (?, ?, ?, ?)
+            `, [req.user.id, req.user.username, contenidoFiltrado, ip]);
+            mensajeId = result.lastID;
+        }
         
         const nuevoMensaje = {
-            id: result.lastID,
+            id: mensajeId,
             usuario_id: req.user.id,
             nombre_mostrado: req.user.username,
             contenido: contenidoFiltrado,
@@ -59,13 +86,12 @@ router.post('/mensaje', async (req, res) => {
             destacado: 0
         };
         
-        // Emitir via WebSocket si está disponible
         const io = getIO();
         if (io) {
             io.to('chat-general').emit('mensaje_recibido', nuevoMensaje);
         }
         
-        logger.info(`Nuevo mensaje de ${req.user.username}`, { userId: req.user.id, mensajeId: result.lastID });
+        logger.info(`Nuevo mensaje de ${req.user.username}`, { userId: req.user.id, mensajeId: mensajeId });
         
         res.json(nuevoMensaje);
         
@@ -79,9 +105,16 @@ router.post('/mensaje', async (req, res) => {
 router.post('/destacar/:mensajeId', async (req, res) => {
     try {
         const db = getDb();
+        const isPG = isPostgreSQL();
         const { mensajeId } = req.params;
         
-        const mensaje = await db.get('SELECT id, destacado FROM mensajes_chat WHERE id = ?', [mensajeId]);
+        let mensaje;
+        if (isPG) {
+            const result = await db.query('SELECT id, destacado FROM mensajes_chat WHERE id = $1', [mensajeId]);
+            mensaje = result.rows[0];
+        } else {
+            mensaje = await db.get('SELECT id, destacado FROM mensajes_chat WHERE id = ?', [mensajeId]);
+        }
         
         if (!mensaje) {
             return res.status(404).json({ error: 'Mensaje no encontrado' });
@@ -98,7 +131,11 @@ router.post('/destacar/:mensajeId', async (req, res) => {
             return res.status(400).json({ error: result.error });
         }
         
-        await db.run('UPDATE mensajes_chat SET destacado = 1 WHERE id = ?', [mensajeId]);
+        if (isPG) {
+            await db.query('UPDATE mensajes_chat SET destacado = true WHERE id = $1', [mensajeId]);
+        } else {
+            await db.run('UPDATE mensajes_chat SET destacado = 1 WHERE id = ?', [mensajeId]);
+        }
         
         const io = getIO();
         if (io) {

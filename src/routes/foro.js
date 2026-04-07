@@ -1,6 +1,6 @@
 const express = require('express');
 const { verifyToken } = require('../middleware/auth');
-const { getDb } = require('../database/db');
+const { getDb, isPostgreSQL } = require('../database/db');
 const { filtrarInsultos, contieneInsultos } = require('../utils/profanity');
 const logger = require('../utils/logger');
 
@@ -12,30 +12,51 @@ router.use(verifyToken);
 router.get('/posts', async (req, res) => {
     try {
         const db = getDb();
+        const isPG = isPostgreSQL();
         const page = parseInt(req.query.page) || 1;
         const limit = Math.min(parseInt(req.query.limit) || 20, 50);
         const offset = (page - 1) * limit;
         
-        const posts = await db.all(`
-            SELECT p.id, p.usuario_id, p.titulo, p.contenido, p.fecha_creacion, 
-                   p.respuestas_count, p.destacado,
-                   u.username as autor_nombre
-            FROM posts_foro p
-            JOIN usuarios u ON p.usuario_id = u.id
-            WHERE u.esta_bloqueado = 0
-            ORDER BY p.destacado DESC, p.fecha_creacion DESC
-            LIMIT ? OFFSET ?
-        `, [limit, offset]);
+        let posts;
+        let total;
         
-        const total = await db.get('SELECT COUNT(*) as count FROM posts_foro');
+        if (isPG) {
+            const result = await db.query(`
+                SELECT p.id, p.usuario_id, p.titulo, p.contenido, p.fecha_creacion, 
+                       p.respuestas_count, p.destacado,
+                       u.username as autor_nombre
+                FROM posts_foro p
+                JOIN usuarios u ON p.usuario_id = u.id
+                WHERE u.esta_bloqueado = false
+                ORDER BY p.destacado DESC, p.fecha_creacion DESC
+                LIMIT $1 OFFSET $2
+            `, [limit, offset]);
+            posts = result.rows;
+            
+            const countResult = await db.query('SELECT COUNT(*) as count FROM posts_foro');
+            total = countResult.rows[0];
+        } else {
+            posts = await db.all(`
+                SELECT p.id, p.usuario_id, p.titulo, p.contenido, p.fecha_creacion, 
+                       p.respuestas_count, p.destacado,
+                       u.username as autor_nombre
+                FROM posts_foro p
+                JOIN usuarios u ON p.usuario_id = u.id
+                WHERE u.esta_bloqueado = 0
+                ORDER BY p.destacado DESC, p.fecha_creacion DESC
+                LIMIT ? OFFSET ?
+            `, [limit, offset]);
+            
+            total = await db.get('SELECT COUNT(*) as count FROM posts_foro');
+        }
         
         res.json({
             posts,
             pagination: {
                 page,
                 limit,
-                total: total.count,
-                pages: Math.ceil(total.count / limit)
+                total: total ? total.count : 0,
+                pages: Math.ceil((total ? total.count : 0) / limit)
             }
         });
         
@@ -66,17 +87,29 @@ router.post('/post', async (req, res) => {
         const contenidoFiltrado = await filtrarInsultos(contenido);
         
         const db = getDb();
+        const isPG = isPostgreSQL();
         const ip = req.ip || req.connection.remoteAddress;
         
-        const result = await db.run(`
-            INSERT INTO posts_foro (usuario_id, titulo, contenido, ip_origen)
-            VALUES (?, ?, ?, ?)
-        `, [req.user.id, tituloFiltrado, contenidoFiltrado, ip]);
+        let postId;
+        if (isPG) {
+            const result = await db.query(`
+                INSERT INTO posts_foro (usuario_id, titulo, contenido, ip_origen)
+                VALUES ($1, $2, $3, $4)
+                RETURNING id
+            `, [req.user.id, tituloFiltrado, contenidoFiltrado, ip]);
+            postId = result.rows[0].id;
+        } else {
+            const result = await db.run(`
+                INSERT INTO posts_foro (usuario_id, titulo, contenido, ip_origen)
+                VALUES (?, ?, ?, ?)
+            `, [req.user.id, tituloFiltrado, contenidoFiltrado, ip]);
+            postId = result.lastID;
+        }
         
-        logger.info(`Nuevo post de ${req.user.username}: ${titulo}`, { userId: req.user.id, postId: result.lastID });
+        logger.info(`Nuevo post de ${req.user.username}: ${titulo}`, { userId: req.user.id, postId: postId });
         
         res.json({
-            id: result.lastID,
+            id: postId,
             titulo: tituloFiltrado,
             contenido: contenidoFiltrado,
             fecha_creacion: new Date().toISOString()
@@ -92,26 +125,50 @@ router.post('/post', async (req, res) => {
 router.get('/post/:id', async (req, res) => {
     try {
         const db = getDb();
+        const isPG = isPostgreSQL();
         const postId = req.params.id;
         
-        const post = await db.get(`
-            SELECT p.*, u.username as autor_nombre
-            FROM posts_foro p
-            JOIN usuarios u ON p.usuario_id = u.id
-            WHERE p.id = ?
-        `, [postId]);
+        let post;
+        if (isPG) {
+            const result = await db.query(`
+                SELECT p.*, u.username as autor_nombre
+                FROM posts_foro p
+                JOIN usuarios u ON p.usuario_id = u.id
+                WHERE p.id = $1
+            `, [postId]);
+            post = result.rows[0];
+        } else {
+            post = await db.get(`
+                SELECT p.*, u.username as autor_nombre
+                FROM posts_foro p
+                JOIN usuarios u ON p.usuario_id = u.id
+                WHERE p.id = ?
+            `, [postId]);
+        }
         
         if (!post) {
             return res.status(404).json({ error: 'Post no encontrado' });
         }
         
-        const comentarios = await db.all(`
-            SELECT c.*, u.username as autor_nombre
-            FROM comentarios_foro c
-            JOIN usuarios u ON c.usuario_id = u.id
-            WHERE c.post_id = ?
-            ORDER BY c.fecha_creacion ASC
-        `, [postId]);
+        let comentarios;
+        if (isPG) {
+            const result = await db.query(`
+                SELECT c.*, u.username as autor_nombre
+                FROM comentarios_foro c
+                JOIN usuarios u ON c.usuario_id = u.id
+                WHERE c.post_id = $1
+                ORDER BY c.fecha_creacion ASC
+            `, [postId]);
+            comentarios = result.rows;
+        } else {
+            comentarios = await db.all(`
+                SELECT c.*, u.username as autor_nombre
+                FROM comentarios_foro c
+                JOIN usuarios u ON c.usuario_id = u.id
+                WHERE c.post_id = ?
+                ORDER BY c.fecha_creacion ASC
+            `, [postId]);
+        }
         
         res.json({ post, comentarios });
         
@@ -137,30 +194,46 @@ router.post('/post/:id/comentar', async (req, res) => {
         
         const contenidoFiltrado = await filtrarInsultos(contenido);
         const db = getDb();
+        const isPG = isPostgreSQL();
         const ip = req.ip || req.connection.remoteAddress;
         
         // Verificar que el post existe
-        const post = await db.get('SELECT id FROM posts_foro WHERE id = ?', [postId]);
-        if (!post) {
+        let postExists;
+        if (isPG) {
+            const result = await db.query('SELECT id FROM posts_foro WHERE id = $1', [postId]);
+            postExists = result.rows[0];
+        } else {
+            postExists = await db.get('SELECT id FROM posts_foro WHERE id = ?', [postId]);
+        }
+        
+        if (!postExists) {
             return res.status(404).json({ error: 'Post no encontrado' });
         }
         
-        const result = await db.run(`
-            INSERT INTO comentarios_foro (post_id, usuario_id, contenido, ip_origen)
-            VALUES (?, ?, ?, ?)
-        `, [postId, req.user.id, contenidoFiltrado, ip]);
+        let comentarioId;
+        if (isPG) {
+            const result = await db.query(`
+                INSERT INTO comentarios_foro (post_id, usuario_id, contenido, ip_origen)
+                VALUES ($1, $2, $3, $4)
+                RETURNING id
+            `, [postId, req.user.id, contenidoFiltrado, ip]);
+            comentarioId = result.rows[0].id;
+            
+            await db.query(`UPDATE posts_foro SET respuestas_count = respuestas_count + 1 WHERE id = $1`, [postId]);
+        } else {
+            const result = await db.run(`
+                INSERT INTO comentarios_foro (post_id, usuario_id, contenido, ip_origen)
+                VALUES (?, ?, ?, ?)
+            `, [postId, req.user.id, contenidoFiltrado, ip]);
+            comentarioId = result.lastID;
+            
+            await db.run(`UPDATE posts_foro SET respuestas_count = respuestas_count + 1 WHERE id = ?`, [postId]);
+        }
         
-        // Actualizar contador de respuestas
-        await db.run(`
-            UPDATE posts_foro 
-            SET respuestas_count = respuestas_count + 1 
-            WHERE id = ?
-        `, [postId]);
-        
-        logger.info(`Nuevo comentario de ${req.user.username} en post ${postId}`, { userId: req.user.id, comentarioId: result.lastID });
+        logger.info(`Nuevo comentario de ${req.user.username} en post ${postId}`, { userId: req.user.id, comentarioId: comentarioId });
         
         res.json({
-            id: result.lastID,
+            id: comentarioId,
             contenido: contenidoFiltrado,
             fecha_creacion: new Date().toISOString(),
             autor_nombre: req.user.username
