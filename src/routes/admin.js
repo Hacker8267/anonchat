@@ -1,14 +1,11 @@
 const express = require('express');
 const { verifyToken, verifyAdmin } = require('../middleware/auth');
-const { getDb } = require('../database/db');
+const { getDb, isPostgreSQL } = require('../database/db');
 const { decrypt } = require('../crypto/aes');
 const { logAdminAction, checkAdminIpWhitelist } = require('../middleware/adminOnly');
 const { agregarCreditos, gastarCreditos } = require('../services/creditos');
 const { agregarPalabraProhibida, eliminarPalabraProhibida } = require('../utils/profanity');
 const logger = require('../utils/logger');
-
-// Importar funciones RSA para desencriptar IPs
-const { decryptWithPrivateKey } = require('../crypto/rsa');
 
 const router = express.Router();
 
@@ -19,42 +16,77 @@ router.use(verifyAdmin);
 router.get('/dashboard', async (req, res) => {
     try {
         const db = getDb();
+        const isPG = isPostgreSQL();
         
-        const totalUsuarios = await db.get('SELECT COUNT(*) as count FROM usuarios WHERE rol = ?', ['user']);
-        const usuariosHoy = await db.get(`
-            SELECT COUNT(*) as count FROM usuarios 
-            WHERE date(fecha_registro) = date('now')
-        `);
+        let totalUsuarios = 0, usuariosHoy = 0, totalMensajes = 0, mensajesHoy = 0;
+        let totalPosts = 0, totalComentarios = 0, usuariosBloqueados = 0, creditosTotales = 0, usuariosActivos = 0;
         
-        const totalMensajes = await db.get('SELECT COUNT(*) as count FROM mensajes_chat');
-        const mensajesHoy = await db.get(`
-            SELECT COUNT(*) as count FROM mensajes_chat 
-            WHERE date(fecha_envio) = date('now')
-        `);
-        
-        const totalPosts = await db.get('SELECT COUNT(*) as count FROM posts_foro');
-        const totalComentarios = await db.get('SELECT COUNT(*) as count FROM comentarios_foro');
-        
-        const usuariosBloqueados = await db.get('SELECT COUNT(*) as count FROM usuarios WHERE esta_bloqueado = 1');
-        
-        const creditosTotales = await db.get('SELECT SUM(creditos) as total FROM usuarios');
-        
-        const usuariosActivos = await db.get(`
-            SELECT COUNT(DISTINCT usuario_id) as count 
-            FROM mensajes_chat 
-            WHERE fecha_envio > datetime('now', '-1 day')
-        `);
+        if (isPG) {
+            const r1 = await db.query('SELECT COUNT(*) as count FROM usuarios WHERE rol = $1', ['user']);
+            totalUsuarios = parseInt(r1.rows[0].count);
+            
+            const r2 = await db.query("SELECT COUNT(*) as count FROM usuarios WHERE DATE(fecha_registro) = CURRENT_DATE");
+            usuariosHoy = parseInt(r2.rows[0].count);
+            
+            const r3 = await db.query('SELECT COUNT(*) as count FROM mensajes_chat');
+            totalMensajes = parseInt(r3.rows[0].count);
+            
+            const r4 = await db.query("SELECT COUNT(*) as count FROM mensajes_chat WHERE DATE(fecha_envio) = CURRENT_DATE");
+            mensajesHoy = parseInt(r4.rows[0].count);
+            
+            const r5 = await db.query('SELECT COUNT(*) as count FROM posts_foro');
+            totalPosts = parseInt(r5.rows[0].count);
+            
+            const r6 = await db.query('SELECT COUNT(*) as count FROM comentarios_foro');
+            totalComentarios = parseInt(r6.rows[0].count);
+            
+            const r7 = await db.query('SELECT COUNT(*) as count FROM usuarios WHERE esta_bloqueado = true');
+            usuariosBloqueados = parseInt(r7.rows[0].count);
+            
+            const r8 = await db.query('SELECT SUM(creditos) as total FROM usuarios');
+            creditosTotales = r8.rows[0].total || 0;
+            
+            const r9 = await db.query("SELECT COUNT(DISTINCT usuario_id) as count FROM mensajes_chat WHERE fecha_envio > NOW() - INTERVAL '1 day'");
+            usuariosActivos = parseInt(r9.rows[0].count);
+        } else {
+            const r1 = await db.get('SELECT COUNT(*) as count FROM usuarios WHERE rol = ?', ['user']);
+            totalUsuarios = r1.count;
+            
+            const r2 = await db.get("SELECT COUNT(*) as count FROM usuarios WHERE date(fecha_registro) = date('now')");
+            usuariosHoy = r2.count;
+            
+            const r3 = await db.get('SELECT COUNT(*) as count FROM mensajes_chat');
+            totalMensajes = r3.count;
+            
+            const r4 = await db.get("SELECT COUNT(*) as count FROM mensajes_chat WHERE date(fecha_envio) = date('now')");
+            mensajesHoy = r4.count;
+            
+            const r5 = await db.get('SELECT COUNT(*) as count FROM posts_foro');
+            totalPosts = r5.count;
+            
+            const r6 = await db.get('SELECT COUNT(*) as count FROM comentarios_foro');
+            totalComentarios = r6.count;
+            
+            const r7 = await db.get('SELECT COUNT(*) as count FROM usuarios WHERE esta_bloqueado = 1');
+            usuariosBloqueados = r7.count;
+            
+            const r8 = await db.get('SELECT SUM(creditos) as total FROM usuarios');
+            creditosTotales = r8.total || 0;
+            
+            const r9 = await db.get("SELECT COUNT(DISTINCT usuario_id) as count FROM mensajes_chat WHERE fecha_envio > datetime('now', '-1 day')");
+            usuariosActivos = r9.count;
+        }
         
         res.json({
-            total_usuarios: totalUsuarios.count,
-            usuarios_hoy: usuariosHoy.count,
-            total_mensajes: totalMensajes.count,
-            mensajes_hoy: mensajesHoy.count,
-            total_posts: totalPosts.count,
-            total_comentarios: totalComentarios.count,
-            usuarios_bloqueados: usuariosBloqueados.count,
-            creditos_totales: creditosTotales.total || 0,
-            usuarios_activos: usuariosActivos.count
+            total_usuarios: totalUsuarios,
+            usuarios_hoy: usuariosHoy,
+            total_mensajes: totalMensajes,
+            mensajes_hoy: mensajesHoy,
+            total_posts: totalPosts,
+            total_comentarios: totalComentarios,
+            usuarios_bloqueados: usuariosBloqueados,
+            creditos_totales: creditosTotales,
+            usuarios_activos: usuariosActivos
         });
         
     } catch (error) {
@@ -63,100 +95,70 @@ router.get('/dashboard', async (req, res) => {
     }
 });
 
-// Listar usuarios (con datos sensibles desencriptados - AHORA CON RSA)
+// Listar usuarios (con datos sensibles desencriptados)
 router.get('/usuarios', async (req, res) => {
     try {
         const db = getDb();
+        const isPG = isPostgreSQL();
         const page = parseInt(req.query.page) || 1;
         const limit = Math.min(parseInt(req.query.limit) || 50, 100);
         const offset = (page - 1) * limit;
         
-        const usuarios = await db.all(`
-            SELECT id, username, username_original, rol, creditos, fecha_registro,
-                   ultimo_acceso, esta_bloqueado, razon_bloqueo, cambio_nombre_count,
-                   ip_registro, ip_actual, user_agent, fingerprint, pais, ciudad, dispositivo
-            FROM usuarios
-            ORDER BY fecha_registro DESC
-            LIMIT ? OFFSET ?
-        `, [limit, offset]);
+        let usuarios;
+        let total;
         
-        // Función auxiliar para desencriptar con RSA o AES según el formato
+        if (isPG) {
+            const result = await db.query(`
+                SELECT id, username, username_original, rol, creditos, fecha_registro,
+                       ultimo_acceso, esta_bloqueado, razon_bloqueo, cambio_nombre_count,
+                       ip_registro, ip_actual, user_agent, fingerprint, pais, ciudad, dispositivo
+                FROM usuarios
+                ORDER BY fecha_registro DESC
+                LIMIT $1 OFFSET $2
+            `, [limit, offset]);
+            usuarios = result.rows;
+            
+            const countResult = await db.query('SELECT COUNT(*) as count FROM usuarios');
+            total = countResult.rows[0].count;
+        } else {
+            usuarios = await db.all(`
+                SELECT id, username, username_original, rol, creditos, fecha_registro,
+                       ultimo_acceso, esta_bloqueado, razon_bloqueo, cambio_nombre_count,
+                       ip_registro, ip_actual, user_agent, fingerprint, pais, ciudad, dispositivo
+                FROM usuarios
+                ORDER BY fecha_registro DESC
+                LIMIT ? OFFSET ?
+            `, [limit, offset]);
+            
+            const countResult = await db.get('SELECT COUNT(*) as count FROM usuarios');
+            total = countResult.count;
+        }
+        
+        // Función auxiliar para desencriptar
         const desencriptarDato = (dato) => {
             if (!dato) return null;
-            
-            // Si el dato contiene ':' es probable que esté encriptado con AES
-            if (dato.includes(':')) {
-                try {
-                    // Intentar desencriptar con RSA primero (para IPs)
-                    const rsaDecrypted = decryptWithPrivateKey(dato);
-                    if (rsaDecrypted && rsaDecrypted !== dato) {
-                        return rsaDecrypted;
-                    }
-                } catch(e) {
-                    // Si falla RSA, intentar con AES
-                    try {
-                        return decrypt(dato);
-                    } catch(e2) {
-                        return dato;
-                    }
-                }
+            try {
+                return decrypt(dato);
+            } catch(e) {
+                return dato;
             }
-            return dato;
         };
         
-        // Desencriptar datos sensibles
-        const usuariosConDatos = usuarios.map(user => {
-            // Desencriptar IPs (pueden estar con RSA)
-            let ipRegistroDesencriptada = user.ip_registro;
-            let ipActualDesencriptada = user.ip_actual;
-            
-            if (user.ip_registro) {
+        const usuariosConDatos = usuarios.map(user => ({
+            ...user,
+            ip_registro: user.ip_registro ? desencriptarDato(user.ip_registro) : null,
+            ip_actual: user.ip_actual ? desencriptarDato(user.ip_actual) : null,
+            user_agent: user.user_agent ? desencriptarDato(user.user_agent) : null,
+            dispositivo: user.dispositivo ? (() => {
                 try {
-                    const desencriptado = decryptWithPrivateKey(user.ip_registro);
-                    if (desencriptado && desencriptado !== user.ip_registro) {
-                        ipRegistroDesencriptada = desencriptado;
-                    } else {
-                        ipRegistroDesencriptada = decrypt(user.ip_registro);
-                    }
+                    const decrypted = desencriptarDato(user.dispositivo);
+                    return JSON.parse(decrypted || '{}');
                 } catch(e) {
-                    ipRegistroDesencriptada = decrypt(user.ip_registro);
+                    return {};
                 }
-            }
-            
-            if (user.ip_actual) {
-                try {
-                    const desencriptado = decryptWithPrivateKey(user.ip_actual);
-                    if (desencriptado && desencriptado !== user.ip_actual) {
-                        ipActualDesencriptada = desencriptado;
-                    } else {
-                        ipActualDesencriptada = decrypt(user.ip_actual);
-                    }
-                } catch(e) {
-                    ipActualDesencriptada = decrypt(user.ip_actual);
-                }
-            }
-            
-            return {
-                ...user,
-                ip_registro: ipRegistroDesencriptada,
-                ip_actual: ipActualDesencriptada,
-                user_agent: user.user_agent ? desencriptarDato(user.user_agent) : null,
-                dispositivo: user.dispositivo ? (() => {
-                    try {
-                        const decrypted = desencriptarDato(user.dispositivo);
-                        return JSON.parse(decrypted || '{}');
-                    } catch(e) {
-                        return {};
-                    }
-                })() : null,
-                pais: user.pais ? desencriptarDato(user.pais) : null,
-                ciudad: user.ciudad ? desencriptarDato(user.ciudad) : null
-            };
-        });
+            })() : null
+        }));
         
-        const total = await db.get('SELECT COUNT(*) as count FROM usuarios');
-        
-        // Log de auditoría
         const ip = req.ip || req.connection.remoteAddress;
         await logAdminAction(req.user.id, 'ver_lista_usuarios', null, `Vio lista de usuarios (página ${page})`, ip);
         
@@ -165,8 +167,8 @@ router.get('/usuarios', async (req, res) => {
             pagination: {
                 page,
                 limit,
-                total: total.count,
-                pages: Math.ceil(total.count / limit)
+                total: total,
+                pages: Math.ceil(total / limit)
             }
         });
         
@@ -176,71 +178,38 @@ router.get('/usuarios', async (req, res) => {
     }
 });
 
-// Obtener detalles de un usuario específico (CON RSA)
+// Obtener detalles de un usuario específico
 router.get('/usuario/:id', async (req, res) => {
     try {
         const db = getDb();
+        const isPG = isPostgreSQL();
         const userId = req.params.id;
         
-        const user = await db.get(`
-            SELECT * FROM usuarios WHERE id = ?
-        `, [userId]);
+        let user;
+        if (isPG) {
+            const result = await db.query('SELECT * FROM usuarios WHERE id = $1', [userId]);
+            user = result.rows[0];
+        } else {
+            user = await db.get('SELECT * FROM usuarios WHERE id = ?', [userId]);
+        }
         
         if (!user) {
             return res.status(404).json({ error: 'Usuario no encontrado' });
         }
         
-        // Función auxiliar para desencriptar
         const desencriptarDato = (dato) => {
             if (!dato) return null;
-            if (dato.includes(':')) {
-                try {
-                    const rsaDecrypted = decryptWithPrivateKey(dato);
-                    if (rsaDecrypted && rsaDecrypted !== dato) return rsaDecrypted;
-                } catch(e) {}
-                try {
-                    return decrypt(dato);
-                } catch(e) {
-                    return dato;
-                }
+            try {
+                return decrypt(dato);
+            } catch(e) {
+                return dato;
             }
-            return dato;
         };
-        
-        // Desencriptar datos sensibles
-        let ipRegistroDesencriptada = user.ip_registro;
-        let ipActualDesencriptada = user.ip_actual;
-        
-        if (user.ip_registro) {
-            try {
-                const desencriptado = decryptWithPrivateKey(user.ip_registro);
-                if (desencriptado && desencriptado !== user.ip_registro) {
-                    ipRegistroDesencriptada = desencriptado;
-                } else {
-                    ipRegistroDesencriptada = decrypt(user.ip_registro);
-                }
-            } catch(e) {
-                ipRegistroDesencriptada = decrypt(user.ip_registro);
-            }
-        }
-        
-        if (user.ip_actual) {
-            try {
-                const desencriptado = decryptWithPrivateKey(user.ip_actual);
-                if (desencriptado && desencriptado !== user.ip_actual) {
-                    ipActualDesencriptada = desencriptado;
-                } else {
-                    ipActualDesencriptada = decrypt(user.ip_actual);
-                }
-            } catch(e) {
-                ipActualDesencriptada = decrypt(user.ip_actual);
-            }
-        }
         
         const userDecrypted = {
             ...user,
-            ip_registro: ipRegistroDesencriptada,
-            ip_actual: ipActualDesencriptada,
+            ip_registro: user.ip_registro ? desencriptarDato(user.ip_registro) : null,
+            ip_actual: user.ip_actual ? desencriptarDato(user.ip_actual) : null,
             user_agent: user.user_agent ? desencriptarDato(user.user_agent) : null,
             dispositivo: user.dispositivo ? (() => {
                 try {
@@ -252,47 +221,76 @@ router.get('/usuario/:id', async (req, res) => {
             })() : null
         };
         
-        // Obtener historial de mensajes
-        const mensajes = await db.all(`
-            SELECT id, contenido, fecha_envio, ip_origen
-            FROM mensajes_chat
-            WHERE usuario_id = ?
-            ORDER BY fecha_envio DESC LIMIT 50
-        `, [userId]);
+        let mensajes, posts, cambiosNombre, transacciones;
+        
+        if (isPG) {
+            const mResult = await db.query(`
+                SELECT id, contenido, fecha_envio, ip_origen
+                FROM mensajes_chat
+                WHERE usuario_id = $1
+                ORDER BY fecha_envio DESC LIMIT 50
+            `, [userId]);
+            mensajes = mResult.rows;
+            
+            const pResult = await db.query(`
+                SELECT id, titulo, contenido, fecha_creacion, ip_origen
+                FROM posts_foro
+                WHERE usuario_id = $1
+                ORDER BY fecha_creacion DESC LIMIT 20
+            `, [userId]);
+            posts = pResult.rows;
+            
+            const cResult = await db.query(`
+                SELECT * FROM historial_nombres
+                WHERE usuario_id = $1
+                ORDER BY fecha_cambio DESC
+            `, [userId]);
+            cambiosNombre = cResult.rows;
+            
+            const tResult = await db.query(`
+                SELECT * FROM transacciones_creditos
+                WHERE usuario_id = $1
+                ORDER BY fecha DESC LIMIT 50
+            `, [userId]);
+            transacciones = tResult.rows;
+        } else {
+            mensajes = await db.all(`
+                SELECT id, contenido, fecha_envio, ip_origen
+                FROM mensajes_chat
+                WHERE usuario_id = ?
+                ORDER BY fecha_envio DESC LIMIT 50
+            `, [userId]);
+            
+            posts = await db.all(`
+                SELECT id, titulo, contenido, fecha_creacion, ip_origen
+                FROM posts_foro
+                WHERE usuario_id = ?
+                ORDER BY fecha_creacion DESC LIMIT 20
+            `, [userId]);
+            
+            cambiosNombre = await db.all(`
+                SELECT * FROM historial_nombres
+                WHERE usuario_id = ?
+                ORDER BY fecha_cambio DESC
+            `, [userId]);
+            
+            transacciones = await db.all(`
+                SELECT * FROM transacciones_creditos
+                WHERE usuario_id = ?
+                ORDER BY fecha DESC LIMIT 50
+            `, [userId]);
+        }
         
         const mensajesDecrypted = mensajes.map(m => ({
             ...m,
             ip_origen: m.ip_origen ? desencriptarDato(m.ip_origen) : null
         }));
         
-        // Obtener historial de posts
-        const posts = await db.all(`
-            SELECT id, titulo, contenido, fecha_creacion, ip_origen
-            FROM posts_foro
-            WHERE usuario_id = ?
-            ORDER BY fecha_creacion DESC LIMIT 20
-        `, [userId]);
-        
         const postsDecrypted = posts.map(p => ({
             ...p,
             ip_origen: p.ip_origen ? desencriptarDato(p.ip_origen) : null
         }));
         
-        // Obtener historial de cambios de nombre
-        const cambiosNombre = await db.all(`
-            SELECT * FROM historial_nombres
-            WHERE usuario_id = ?
-            ORDER BY fecha_cambio DESC
-        `, [userId]);
-        
-        // Obtener transacciones de créditos
-        const transacciones = await db.all(`
-            SELECT * FROM transacciones_creditos
-            WHERE usuario_id = ?
-            ORDER BY fecha DESC LIMIT 50
-        `, [userId]);
-        
-        // Log de auditoría
         const ip = req.ip || req.connection.remoteAddress;
         await logAdminAction(req.user.id, 'ver_detalle_usuario', userId, `Vio detalles del usuario ${user.username}`, ip);
         
@@ -316,8 +314,15 @@ router.post('/usuario/:id/bloquear', async (req, res) => {
         const { razon, dias } = req.body;
         const userId = req.params.id;
         const db = getDb();
+        const isPG = isPostgreSQL();
         
-        const user = await db.get('SELECT id, username, esta_bloqueado, rol FROM usuarios WHERE id = ?', [userId]);
+        let user;
+        if (isPG) {
+            const result = await db.query('SELECT id, username, esta_bloqueado, rol FROM usuarios WHERE id = $1', [userId]);
+            user = result.rows[0];
+        } else {
+            user = await db.get('SELECT id, username, esta_bloqueado, rol FROM usuarios WHERE id = ?', [userId]);
+        }
         
         if (!user) {
             return res.status(404).json({ error: 'Usuario no encontrado' });
@@ -333,16 +338,24 @@ router.post('/usuario/:id/bloquear', async (req, res) => {
             bloqueadoHasta.setDate(bloqueadoHasta.getDate() + dias);
         }
         
-        await db.run(`
-            UPDATE usuarios 
-            SET esta_bloqueado = 1, razon_bloqueo = ?, bloqueado_hasta = ?
-            WHERE id = ?
-        `, [razon || 'Sin especificar', bloqueadoHasta, userId]);
+        if (isPG) {
+            await db.query(`
+                UPDATE usuarios 
+                SET esta_bloqueado = true, razon_bloqueo = $1, bloqueado_hasta = $2
+                WHERE id = $3
+            `, [razon || 'Sin especificar', bloqueadoHasta, userId]);
+            
+            await db.query('UPDATE sesiones SET activa = false WHERE usuario_id = $1', [userId]);
+        } else {
+            await db.run(`
+                UPDATE usuarios 
+                SET esta_bloqueado = 1, razon_bloqueo = ?, bloqueado_hasta = ?
+                WHERE id = ?
+            `, [razon || 'Sin especificar', bloqueadoHasta, userId]);
+            
+            await db.run('UPDATE sesiones SET activa = 0 WHERE usuario_id = ?', [userId]);
+        }
         
-        // Cerrar sesiones activas
-        await db.run('UPDATE sesiones SET activa = 0 WHERE usuario_id = ?', [userId]);
-        
-        // Log de auditoría
         const ip = req.ip || req.connection.remoteAddress;
         await logAdminAction(req.user.id, 'bloquear_usuario', userId, `Bloqueado: ${razon} por ${dias || 'indefinido'} días`, ip);
         
@@ -361,20 +374,34 @@ router.post('/usuario/:id/desbloquear', async (req, res) => {
     try {
         const userId = req.params.id;
         const db = getDb();
+        const isPG = isPostgreSQL();
         
-        const user = await db.get('SELECT id, username FROM usuarios WHERE id = ?', [userId]);
+        let user;
+        if (isPG) {
+            const result = await db.query('SELECT id, username FROM usuarios WHERE id = $1', [userId]);
+            user = result.rows[0];
+        } else {
+            user = await db.get('SELECT id, username FROM usuarios WHERE id = ?', [userId]);
+        }
         
         if (!user) {
             return res.status(404).json({ error: 'Usuario no encontrado' });
         }
         
-        await db.run(`
-            UPDATE usuarios 
-            SET esta_bloqueado = 0, razon_bloqueo = NULL, bloqueado_hasta = NULL
-            WHERE id = ?
-        `, [userId]);
+        if (isPG) {
+            await db.query(`
+                UPDATE usuarios 
+                SET esta_bloqueado = false, razon_bloqueo = NULL, bloqueado_hasta = NULL
+                WHERE id = $1
+            `, [userId]);
+        } else {
+            await db.run(`
+                UPDATE usuarios 
+                SET esta_bloqueado = 0, razon_bloqueo = NULL, bloqueado_hasta = NULL
+                WHERE id = ?
+            `, [userId]);
+        }
         
-        // Log de auditoría
         const ip = req.ip || req.connection.remoteAddress;
         await logAdminAction(req.user.id, 'desbloquear_usuario', userId, `Desbloqueado`, ip);
         
@@ -399,7 +426,15 @@ router.post('/usuario/:id/creditos', async (req, res) => {
         }
         
         const db = getDb();
-        const user = await db.get('SELECT id, username FROM usuarios WHERE id = ?', [userId]);
+        const isPG = isPostgreSQL();
+        
+        let user;
+        if (isPG) {
+            const result = await db.query('SELECT id, username FROM usuarios WHERE id = $1', [userId]);
+            user = result.rows[0];
+        } else {
+            user = await db.get('SELECT id, username FROM usuarios WHERE id = ?', [userId]);
+        }
         
         if (!user) {
             return res.status(404).json({ error: 'Usuario no encontrado' });
@@ -416,7 +451,6 @@ router.post('/usuario/:id/creditos', async (req, res) => {
             return res.status(400).json({ error: resultado.error });
         }
         
-        // Log de auditoría
         const ip = req.ip || req.connection.remoteAddress;
         await logAdminAction(req.user.id, 'modificar_creditos', userId, `${cantidad > 0 ? 'Agregó' : 'Quitó'} ${Math.abs(cantidad)} créditos. Motivo: ${motivo || 'N/A'}`, ip);
         
@@ -435,25 +469,39 @@ router.delete('/mensaje/:id', async (req, res) => {
     try {
         const mensajeId = req.params.id;
         const db = getDb();
+        const isPG = isPostgreSQL();
         
-        const mensaje = await db.get(`
-            SELECT m.*, u.username 
-            FROM mensajes_chat m
-            JOIN usuarios u ON m.usuario_id = u.id
-            WHERE m.id = ?
-        `, [mensajeId]);
+        let mensaje;
+        if (isPG) {
+            const result = await db.query(`
+                SELECT m.*, u.username 
+                FROM mensajes_chat m
+                JOIN usuarios u ON m.usuario_id = u.id
+                WHERE m.id = $1
+            `, [mensajeId]);
+            mensaje = result.rows[0];
+        } else {
+            mensaje = await db.get(`
+                SELECT m.*, u.username 
+                FROM mensajes_chat m
+                JOIN usuarios u ON m.usuario_id = u.id
+                WHERE m.id = ?
+            `, [mensajeId]);
+        }
         
         if (!mensaje) {
             return res.status(404).json({ error: 'Mensaje no encontrado' });
         }
         
-        await db.run('DELETE FROM mensajes_chat WHERE id = ?', [mensajeId]);
+        if (isPG) {
+            await db.query('DELETE FROM mensajes_chat WHERE id = $1', [mensajeId]);
+        } else {
+            await db.run('DELETE FROM mensajes_chat WHERE id = ?', [mensajeId]);
+        }
         
-        // Log de auditoría
         const ip = req.ip || req.connection.remoteAddress;
-        await logAdminAction(req.user.id, 'eliminar_mensaje', mensaje.usuario_id, `Mensaje ID ${mensajeId} de ${mensaje.username}: "${mensaje.contenido.substring(0, 100)}"`, ip);
+        await logAdminAction(req.user.id, 'eliminar_mensaje', mensaje.usuario_id, `Mensaje ID ${mensajeId} de ${mensaje.username}: "${mensaje.contenido?.substring(0, 100)}"`, ip);
         
-        // Emitir evento WebSocket
         const io = require('../services/websocket').getIO();
         if (io) {
             io.to('chat-general').emit('mensaje_eliminado', { mensajeId });
@@ -472,23 +520,38 @@ router.delete('/post/:id', async (req, res) => {
     try {
         const postId = req.params.id;
         const db = getDb();
+        const isPG = isPostgreSQL();
         
-        const post = await db.get(`
-            SELECT p.*, u.username 
-            FROM posts_foro p
-            JOIN usuarios u ON p.usuario_id = u.id
-            WHERE p.id = ?
-        `, [postId]);
+        let post;
+        if (isPG) {
+            const result = await db.query(`
+                SELECT p.*, u.username 
+                FROM posts_foro p
+                JOIN usuarios u ON p.usuario_id = u.id
+                WHERE p.id = $1
+            `, [postId]);
+            post = result.rows[0];
+        } else {
+            post = await db.get(`
+                SELECT p.*, u.username 
+                FROM posts_foro p
+                JOIN usuarios u ON p.usuario_id = u.id
+                WHERE p.id = ?
+            `, [postId]);
+        }
         
         if (!post) {
             return res.status(404).json({ error: 'Post no encontrado' });
         }
         
-        // Eliminar comentarios primero
-        await db.run('DELETE FROM comentarios_foro WHERE post_id = ?', [postId]);
-        await db.run('DELETE FROM posts_foro WHERE id = ?', [postId]);
+        if (isPG) {
+            await db.query('DELETE FROM comentarios_foro WHERE post_id = $1', [postId]);
+            await db.query('DELETE FROM posts_foro WHERE id = $1', [postId]);
+        } else {
+            await db.run('DELETE FROM comentarios_foro WHERE post_id = ?', [postId]);
+            await db.run('DELETE FROM posts_foro WHERE id = ?', [postId]);
+        }
         
-        // Log de auditoría
         const ip = req.ip || req.connection.remoteAddress;
         await logAdminAction(req.user.id, 'eliminar_post', post.usuario_id, `Post ID ${postId} de ${post.username}: "${post.titulo}"`, ip);
         
@@ -504,7 +567,16 @@ router.delete('/post/:id', async (req, res) => {
 router.get('/palabras-prohibidas', async (req, res) => {
     try {
         const db = getDb();
-        const palabras = await db.all('SELECT * FROM palabras_prohibidas ORDER BY palabra');
+        const isPG = isPostgreSQL();
+        
+        let palabras;
+        if (isPG) {
+            const result = await db.query('SELECT * FROM palabras_prohibidas ORDER BY palabra');
+            palabras = result.rows;
+        } else {
+            palabras = await db.all('SELECT * FROM palabras_prohibidas ORDER BY palabra');
+        }
+        
         res.json(palabras);
         
     } catch (error) {
@@ -527,7 +599,6 @@ router.post('/palabras-prohibidas', async (req, res) => {
             return res.status(400).json({ error: 'La palabra ya existe' });
         }
         
-        // Log de auditoría
         const ip = req.ip || req.connection.remoteAddress;
         await logAdminAction(req.user.id, 'agregar_palabra', null, `Agregó palabra prohibida: ${palabra}`, ip);
         
@@ -545,7 +616,6 @@ router.delete('/palabras-prohibidas/:palabra', async (req, res) => {
         
         await eliminarPalabraProhibida(palabra);
         
-        // Log de auditoría
         const ip = req.ip || req.connection.remoteAddress;
         await logAdminAction(req.user.id, 'eliminar_palabra', null, `Eliminó palabra prohibida: ${palabra}`, ip);
         
@@ -561,27 +631,46 @@ router.delete('/palabras-prohibidas/:palabra', async (req, res) => {
 router.get('/auditoria', async (req, res) => {
     try {
         const db = getDb();
+        const isPG = isPostgreSQL();
         const page = parseInt(req.query.page) || 1;
         const limit = Math.min(parseInt(req.query.limit) || 50, 100);
         const offset = (page - 1) * limit;
         
-        const logs = await db.all(`
-            SELECT a.*, u.username as admin_nombre
-            FROM auditoria_admin a
-            LEFT JOIN usuarios u ON a.admin_id = u.id
-            ORDER BY a.fecha DESC
-            LIMIT ? OFFSET ?
-        `, [limit, offset]);
+        let logs;
+        let total;
         
-        const total = await db.get('SELECT COUNT(*) as count FROM auditoria_admin');
+        if (isPG) {
+            const result = await db.query(`
+                SELECT a.*, u.username as admin_nombre
+                FROM auditoria_admin a
+                LEFT JOIN usuarios u ON a.admin_id = u.id
+                ORDER BY a.fecha DESC
+                LIMIT $1 OFFSET $2
+            `, [limit, offset]);
+            logs = result.rows;
+            
+            const countResult = await db.query('SELECT COUNT(*) as count FROM auditoria_admin');
+            total = countResult.rows[0].count;
+        } else {
+            logs = await db.all(`
+                SELECT a.*, u.username as admin_nombre
+                FROM auditoria_admin a
+                LEFT JOIN usuarios u ON a.admin_id = u.id
+                ORDER BY a.fecha DESC
+                LIMIT ? OFFSET ?
+            `, [limit, offset]);
+            
+            const countResult = await db.get('SELECT COUNT(*) as count FROM auditoria_admin');
+            total = countResult.count;
+        }
         
         res.json({
             logs,
             pagination: {
                 page,
                 limit,
-                total: total.count,
-                pages: Math.ceil(total.count / limit)
+                total: total,
+                pages: Math.ceil(total / limit)
             }
         });
         
