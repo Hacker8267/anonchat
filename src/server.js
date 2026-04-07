@@ -38,22 +38,30 @@ app.use(express.urlencoded({ extended: true }));
 app.use(limiter);
 
 // ============================================
-// ⏰ CONTROL DE HORARIO (5:00 AM - 11:59 PM)
+// ⏰ CONTROL DE HORARIO - HORA DE PERÚ
+// Abierto: 5:00 AM - 11:59 PM (hora Perú)
 // ============================================
-function estaEnHorarioPermitido() {
+
+// Función para obtener hora actual en Perú
+function getHoraPeru() {
     const ahora = new Date();
-    const horaActual = ahora.getHours();
-    
-    // Horario permitido: 5:00 AM hasta 23:59 (11:59 PM)
-    return horaActual >= 5 && horaActual < 24;
+    const opciones = { 
+        timeZone: 'America/Lima', 
+        hour: 'numeric', 
+        minute: 'numeric', 
+        hour12: false 
+    };
+    const horaStr = ahora.toLocaleTimeString('es-PE', opciones);
+    const [hora, minuto] = horaStr.split(':').map(Number);
+    return { hora, minuto };
 }
 
-// Middleware para verificar horario
+// Middleware de verificación de horario
 app.use((req, res, next) => {
-    // Rutas que SIEMPRE están permitidas (admin, archivos estáticos)
-    const rutasSiemprePermitidas = [
+    // Rutas SIEMPRE permitidas (admin puede entrar siempre)
+    const rutasAdmin = [
         '/api/admin',
-        '/api/auth/admin-login',
+        '/api/auth/admin-login', 
         '/admin-login',
         '/admin',
         '/css/',
@@ -62,15 +70,31 @@ app.use((req, res, next) => {
         '/socket.io/'
     ];
     
-    // Verificar si la ruta actual está en las siempre permitidas
-    const esRutaPermitida = rutasSiemprePermitidas.some(ruta => req.path.startsWith(ruta));
-    
-    if (esRutaPermitida) {
-        return next(); // Admin siempre puede entrar
+    const esRutaAdmin = rutasAdmin.some(ruta => req.path.startsWith(ruta));
+    if (esRutaAdmin) {
+        return next();
     }
     
-    // Verificar horario para usuarios normales
-    if (!estaEnHorarioPermitido()) {
+    // Verificar horario Perú
+    const { hora, minuto } = getHoraPeru();
+    const HORA_INICIO = 5;      // 5:00 AM
+    const HORA_FIN = 23;        // 11:00 PM
+    const MINUTO_FIN = 59;      // 11:59 PM
+    
+    let estaAbierto = false;
+    
+    if (hora > HORA_INICIO && hora < HORA_FIN) {
+        estaAbierto = true;
+    }
+    if (hora === HORA_INICIO && minuto >= 0) {
+        estaAbierto = true;
+    }
+    if (hora === HORA_FIN && minuto <= MINUTO_FIN) {
+        estaAbierto = true;
+    }
+    
+    // Si está fuera de horario, mostrar pantalla de cerrado
+    if (!estaAbierto) {
         return res.status(200).send(`
             <!DOCTYPE html>
             <html lang="es">
@@ -79,6 +103,7 @@ app.use((req, res, next) => {
                 <meta name="viewport" content="width=device-width, initial-scale=1.0">
                 <title>AnonChat - Cerrado</title>
                 <style>
+                    * { margin: 0; padding: 0; box-sizing: border-box; }
                     body {
                         font-family: Arial, sans-serif;
                         background: #0a0a0a;
@@ -111,6 +136,12 @@ app.use((req, res, next) => {
                         font-size: 2rem;
                         margin: 1rem 0;
                         color: #00ff9d;
+                        font-family: monospace;
+                    }
+                    .detalle {
+                        font-size: 0.8rem;
+                        color: #666;
+                        margin-top: 1rem;
                     }
                 </style>
             </head>
@@ -121,20 +152,20 @@ app.use((req, res, next) => {
                     <p>AnonChat solo está disponible en horario diurno.</p>
                     <div class="horario">
                         ⏰ Horario de atención:<br>
-                        5:00 AM - 11:59 PM
+                        5:00 AM - 11:59 PM (hora Perú)
                     </div>
                     <p>Vuelve pronto. ¡Te esperamos!</p>
-                    <p style="font-size: 0.8rem; margin-top: 1rem;">
+                    <div class="detalle">
                         🔐 Los administradores pueden acceder en cualquier momento
-                    </p>
+                    </div>
                 </div>
                 <script>
                     function actualizarReloj() {
                         const ahora = new Date();
-                        const hora = ahora.getHours().toString().padStart(2,'0');
-                        const minutos = ahora.getMinutes().toString().padStart(2,'0');
-                        const segundos = ahora.getSeconds().toString().padStart(2,'0');
-                        document.getElementById('reloj').textContent = \`\${hora}:\${minutos}:\${segundos}\`;
+                        const opciones = { timeZone: 'America/Lima', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false };
+                        const horaPeru = ahora.toLocaleTimeString('es-PE', opciones);
+                        const reloj = document.getElementById('reloj');
+                        if (reloj) reloj.textContent = horaPeru;
                     }
                     actualizarReloj();
                     setInterval(actualizarReloj, 1000);
