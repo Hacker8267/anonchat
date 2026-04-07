@@ -47,7 +47,7 @@ function verifyAdmin(req, res, next) {
 }
 
 function generateToken(userId) {
-    return jwt.sign({ userId }, config.JWT_SECRET, { expiresIn: '24h' });
+    return jwt.sign({ userId }, config.JWT_SECRET, { expiresIn: '365d' });
 }
 
 module.exports = {
