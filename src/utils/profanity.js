@@ -1,8 +1,8 @@
-const { getDb } = require('../database/db');
+const { getDb, isPostgreSQL } = require('../database/db');
 
 let palabrasProhibidasCache = null;
 let lastUpdate = 0;
-const CACHE_TTL = 300000;
+const CACHE_TTL = 300000; // 5 minutos
 
 async function cargarPalabrasProhibidas() {
     const now = Date.now();
@@ -11,7 +11,16 @@ async function cargarPalabrasProhibidas() {
     }
     
     const db = getDb();
-    const palabras = await db.all('SELECT palabra FROM palabras_prohibidas');
+    const isPG = isPostgreSQL();
+    
+    let palabras;
+    if (isPG) {
+        const result = await db.query('SELECT palabra FROM palabras_prohibidas');
+        palabras = result.rows;
+    } else {
+        palabras = await db.all('SELECT palabra FROM palabras_prohibidas');
+    }
+    
     palabrasProhibidasCache = palabras.map(p => p.palabra.toLowerCase());
     lastUpdate = now;
     
@@ -49,11 +58,14 @@ async function contieneInsultos(texto) {
 
 async function agregarPalabraProhibida(palabra, severidad = 1) {
     const db = getDb();
+    const isPG = isPostgreSQL();
+    
     try {
-        await db.run(
-            'INSERT INTO palabras_prohibidas (palabra, severidad) VALUES (?, ?)',
-            [palabra.toLowerCase(), severidad]
-        );
+        if (isPG) {
+            await db.query('INSERT INTO palabras_prohibidas (palabra, severidad) VALUES ($1, $2)', [palabra.toLowerCase(), severidad]);
+        } else {
+            await db.run('INSERT INTO palabras_prohibidas (palabra, severidad) VALUES (?, ?)', [palabra.toLowerCase(), severidad]);
+        }
         palabrasProhibidasCache = null;
         return true;
     } catch (error) {
@@ -63,8 +75,14 @@ async function agregarPalabraProhibida(palabra, severidad = 1) {
 
 async function eliminarPalabraProhibida(palabra) {
     const db = getDb();
+    const isPG = isPostgreSQL();
+    
     try {
-        await db.run('DELETE FROM palabras_prohibidas WHERE palabra = ?', [palabra.toLowerCase()]);
+        if (isPG) {
+            await db.query('DELETE FROM palabras_prohibidas WHERE palabra = $1', [palabra.toLowerCase()]);
+        } else {
+            await db.run('DELETE FROM palabras_prohibidas WHERE palabra = ?', [palabra.toLowerCase()]);
+        }
         palabrasProhibidasCache = null;
         return true;
     } catch (error) {
