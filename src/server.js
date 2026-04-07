@@ -10,6 +10,15 @@ const config = require('./config/env');
 const logger = require('./utils/logger');
 const bcrypt = require('bcryptjs');
 
+// Manejo de errores para evitar crashes
+process.on('uncaughtException', (err) => {
+    console.error('Error no capturado:', err.message);
+});
+
+process.on('unhandledRejection', (err) => {
+    console.error('Promesa rechazada:', err);
+});
+
 // Importar rutas
 const authRoutes = require('./routes/auth');
 const usuarioRoutes = require('./routes/usuario');
@@ -27,6 +36,117 @@ app.use(securityHeaders);
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(limiter);
+
+// ============================================
+// ⏰ CONTROL DE HORARIO (5:00 AM - 12:00 AM)
+// ============================================
+function estaEnHorarioPermitido() {
+    const ahora = new Date();
+    const horaActual = ahora.getHours();
+    const minutosActual = ahora.getMinutes();
+    
+    // Horario permitido: desde 5:00 AM hasta 23:59 (11:59 PM)
+    // 5:00 AM = 5, 12:00 AM = 0 (medianoche)
+    if (horaActual >= 5 && horaActual < 24) {
+        return true;
+    }
+    // Permitir hasta las 12:00 AM (medianoche) = hora 0
+    if (horaActual === 0 && minutosActual === 0) {
+        return true;
+    }
+    return false;
+}
+
+// Middleware para verificar horario (excepto para admin)
+app.use((req, res, next) => {
+    // Excluir rutas de admin y archivos estáticos (para que puedas administrar)
+    const esRutaAdmin = req.path.startsWith('/api/admin') || 
+                        req.path === '/admin-login' || 
+                        req.path === '/admin' ||
+                        req.path.startsWith('/css/') ||
+                        req.path.startsWith('/js/') ||
+                        req.path === '/manifest.json';
+    
+    // Si es admin o archivo estático, siempre permitir
+    if (esRutaAdmin) {
+        return next();
+    }
+    
+    // Verificar horario
+    if (!estaEnHorarioPermitido()) {
+        const horaCierre = new Date();
+        horaCierre.setHours(5, 0, 0);
+        const horaApertura = new Date();
+        horaApertura.setHours(5, 0, 0);
+        horaApertura.setDate(horaApertura.getDate() + 1);
+        
+        return res.status(503).send(`
+            <!DOCTYPE html>
+            <html lang="es">
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>AnonChat - Cerrado</title>
+                <style>
+                    body {
+                        font-family: Arial, sans-serif;
+                        background: #0a0a0a;
+                        color: white;
+                        display: flex;
+                        justify-content: center;
+                        align-items: center;
+                        min-height: 100vh;
+                        margin: 0;
+                        text-align: center;
+                    }
+                    .container {
+                        background: #1a1a1a;
+                        padding: 2rem;
+                        border-radius: 16px;
+                        max-width: 400px;
+                        border: 1px solid #333;
+                    }
+                    h1 { color: #ff4444; margin-bottom: 1rem; }
+                    p { color: #888; margin-bottom: 1.5rem; line-height: 1.5; }
+                    .horario {
+                        background: #00ff9d;
+                        color: #0a0a0a;
+                        padding: 10px;
+                        border-radius: 8px;
+                        font-weight: bold;
+                        margin: 1rem 0;
+                    }
+                    .admin-link {
+                        margin-top: 1.5rem;
+                        font-size: 0.8rem;
+                    }
+                    .admin-link a {
+                        color: #00ff9d;
+                        text-decoration: none;
+                    }
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <h1>🌙 Sitio Cerrado</h1>
+                    <p>AnonChat solo está disponible en horario diurno para garantizar la mejor experiencia.</p>
+                    <div class="horario">
+                        ⏰ Horario de atención:<br>
+                        5:00 AM - 12:00 AM
+                    </div>
+                    <p>Vuelve pronto. ¡Te esperamos!</p>
+                    <div class="admin-link">
+                        🔐 <a href="/admin-login">Acceso Administrador</a>
+                    </div>
+                </div>
+            </body>
+            </html>
+        `);
+    }
+    
+    next();
+});
+// ============================================
 
 // Servir archivos estáticos del frontend
 app.use(express.static(path.join(__dirname, '../frontend/public')));
