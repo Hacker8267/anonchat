@@ -38,49 +38,40 @@ app.use(express.urlencoded({ extended: true }));
 app.use(limiter);
 
 // ============================================
-// ⏰ CONTROL DE HORARIO (5:00 AM - 12:00 AM)
+// ⏰ CONTROL DE HORARIO (5:00 AM - 11:59 PM)
 // ============================================
 function estaEnHorarioPermitido() {
     const ahora = new Date();
     const horaActual = ahora.getHours();
-    const minutosActual = ahora.getMinutes();
     
-    // Horario permitido: desde 5:00 AM hasta 23:59 (11:59 PM)
-    // 5:00 AM = 5, 12:00 AM = 0 (medianoche)
-    if (horaActual >= 5 && horaActual < 24) {
-        return true;
-    }
-    // Permitir hasta las 12:00 AM (medianoche) = hora 0
-    if (horaActual === 0 && minutosActual === 0) {
-        return true;
-    }
-    return false;
+    // Horario permitido: 5:00 AM hasta 23:59 (11:59 PM)
+    return horaActual >= 5 && horaActual < 24;
 }
 
-// Middleware para verificar horario (excepto para admin)
+// Middleware para verificar horario
 app.use((req, res, next) => {
-    // Excluir rutas de admin y archivos estáticos (para que puedas administrar)
-    const esRutaAdmin = req.path.startsWith('/api/admin') || 
-                        req.path === '/admin-login' || 
-                        req.path === '/admin' ||
-                        req.path.startsWith('/css/') ||
-                        req.path.startsWith('/js/') ||
-                        req.path === '/manifest.json';
+    // Rutas que SIEMPRE están permitidas (admin, archivos estáticos)
+    const rutasSiemprePermitidas = [
+        '/api/admin',
+        '/api/auth/admin-login',
+        '/admin-login',
+        '/admin',
+        '/css/',
+        '/js/',
+        '/manifest.json',
+        '/socket.io/'
+    ];
     
-    // Si es admin o archivo estático, siempre permitir
-    if (esRutaAdmin) {
-        return next();
+    // Verificar si la ruta actual está en las siempre permitidas
+    const esRutaPermitida = rutasSiemprePermitidas.some(ruta => req.path.startsWith(ruta));
+    
+    if (esRutaPermitida) {
+        return next(); // Admin siempre puede entrar
     }
     
-    // Verificar horario
+    // Verificar horario para usuarios normales
     if (!estaEnHorarioPermitido()) {
-        const horaCierre = new Date();
-        horaCierre.setHours(5, 0, 0);
-        const horaApertura = new Date();
-        horaApertura.setHours(5, 0, 0);
-        horaApertura.setDate(horaApertura.getDate() + 1);
-        
-        return res.status(503).send(`
+        return res.status(200).send(`
             <!DOCTYPE html>
             <html lang="es">
             <head>
@@ -106,7 +97,7 @@ app.use((req, res, next) => {
                         max-width: 400px;
                         border: 1px solid #333;
                     }
-                    h1 { color: #ff4444; margin-bottom: 1rem; }
+                    h1 { color: #ffaa44; margin-bottom: 1rem; }
                     p { color: #888; margin-bottom: 1.5rem; line-height: 1.5; }
                     .horario {
                         background: #00ff9d;
@@ -116,29 +107,38 @@ app.use((req, res, next) => {
                         font-weight: bold;
                         margin: 1rem 0;
                     }
-                    .admin-link {
-                        margin-top: 1.5rem;
-                        font-size: 0.8rem;
-                    }
-                    .admin-link a {
+                    .reloj {
+                        font-size: 2rem;
+                        margin: 1rem 0;
                         color: #00ff9d;
-                        text-decoration: none;
                     }
                 </style>
             </head>
             <body>
                 <div class="container">
                     <h1>🌙 Sitio Cerrado</h1>
-                    <p>AnonChat solo está disponible en horario diurno para garantizar la mejor experiencia.</p>
+                    <div class="reloj" id="reloj"></div>
+                    <p>AnonChat solo está disponible en horario diurno.</p>
                     <div class="horario">
                         ⏰ Horario de atención:<br>
-                        5:00 AM - 12:00 AM
+                        5:00 AM - 11:59 PM
                     </div>
                     <p>Vuelve pronto. ¡Te esperamos!</p>
-                    <div class="admin-link">
-                        🔐 <a href="/admin-login">Acceso Administrador</a>
-                    </div>
+                    <p style="font-size: 0.8rem; margin-top: 1rem;">
+                        🔐 Los administradores pueden acceder en cualquier momento
+                    </p>
                 </div>
+                <script>
+                    function actualizarReloj() {
+                        const ahora = new Date();
+                        const hora = ahora.getHours().toString().padStart(2,'0');
+                        const minutos = ahora.getMinutes().toString().padStart(2,'0');
+                        const segundos = ahora.getSeconds().toString().padStart(2,'0');
+                        document.getElementById('reloj').textContent = \`\${hora}:\${minutos}:\${segundos}\`;
+                    }
+                    actualizarReloj();
+                    setInterval(actualizarReloj, 1000);
+                </script>
             </body>
             </html>
         `);
