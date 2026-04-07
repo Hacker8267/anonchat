@@ -63,34 +63,35 @@ async function initializeDatabase() {
 
 // Tablas para SQLite
 async function createTablesSQLite() {
-    await db.exec(`
-        CREATE TABLE IF NOT EXISTS usuarios (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT UNIQUE NOT NULL,
-            username_original TEXT,
-            password_hash TEXT,
-            rol TEXT DEFAULT 'user',
-            creditos INTEGER DEFAULT 3,
-            fecha_registro DATETIME DEFAULT CURRENT_TIMESTAMP,
-            ultimo_acceso DATETIME,
-            ip_registro TEXT,
-            ip_actual TEXT,
-            fingerprint TEXT UNIQUE,
-            user_agent TEXT,
-            pais TEXT,
-            ciudad TEXT,
-            dispositivo TEXT,
-            esta_bloqueado BOOLEAN DEFAULT 0,
-            bloqueado_hasta DATETIME,
-            razon_bloqueo TEXT,
-            cambio_nombre_count INTEGER DEFAULT 0,
-            ultimo_cambio_nombre DATETIME,
-            codigo_invitacion TEXT UNIQUE,
-            invitado_por INTEGER,
-            ultimo_credito_diario DATETIME
-        )
-    `);
     
+await db.exec(`
+    CREATE TABLE IF NOT EXISTS usuarios (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT UNIQUE NOT NULL,
+        username_original TEXT,
+        password_hash TEXT,
+        rol TEXT DEFAULT 'user',
+        creditos INTEGER DEFAULT 3,
+        fecha_registro DATETIME DEFAULT CURRENT_TIMESTAMP,
+        ultimo_acceso DATETIME,
+        ip_registro TEXT,
+        ip_actual TEXT,
+        fingerprint TEXT,
+        user_agent TEXT,
+        pais TEXT,
+        ciudad TEXT,
+        dispositivo TEXT,
+        esta_bloqueado BOOLEAN DEFAULT 0,
+        bloqueado_hasta DATETIME,
+        razon_bloqueo TEXT,
+        cambio_nombre_count INTEGER DEFAULT 0,
+        ultimo_cambio_nombre DATETIME,
+        codigo_invitacion TEXT UNIQUE,
+        invitado_por INTEGER,
+        ultimo_credito_diario DATETIME
+    )
+`);
+
     await db.exec(`
         CREATE TABLE IF NOT EXISTS mensajes_chat (
             id INTEGER PRIMARY KEY AUTOINCREMENT,

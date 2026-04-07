@@ -28,7 +28,7 @@ async function initializePostgreSQL() {
             ultimo_acceso TIMESTAMP,
             ip_registro TEXT,
             ip_actual TEXT,
-            fingerprint TEXT UNIQUE,
+            fingerprint TEXT,
             user_agent TEXT,
             pais TEXT,
             ciudad TEXT,
